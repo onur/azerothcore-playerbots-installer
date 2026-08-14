@@ -153,6 +153,7 @@ func copyWindowsDLLs(mysqlDir, opensslDir, installDir string) error {
 		filepath.Join(mysqlPath, "lib", "libmysql.dll"),
 		filepath.Join(opensslPath, "bin", "libcrypto-3-x64.dll"),
 		filepath.Join(opensslPath, "bin", "libssl-3-x64.dll"),
+		filepath.Join(opensslPath, "lib", "ossl-modules", "legacy.dll"),
 	}
 
 	for _, dll := range dllsToCopy {

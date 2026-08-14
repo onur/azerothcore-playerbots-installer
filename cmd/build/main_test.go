@@ -87,6 +87,50 @@ func TestCopyWindowsDLLsMissingDirs(t *testing.T) {
 	}
 }
 
+func TestCopyWindowsDLLs(t *testing.T) {
+	mysqlDir := t.TempDir()
+	opensslDir := t.TempDir()
+	installDir := t.TempDir()
+
+	// Create required MySQL DLL
+	mysqlLibDir := filepath.Join(mysqlDir, "lib")
+	if err := os.MkdirAll(mysqlLibDir, 0755); err != nil {
+		t.Fatalf("failed to create mysqlLibDir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mysqlLibDir, "libmysql.dll"), []byte("libmysql"), 0644); err != nil {
+		t.Fatalf("failed to write libmysql.dll: %v", err)
+	}
+
+	// Create required OpenSSL DLLs
+	opensslBinDir := filepath.Join(opensslDir, "bin")
+	opensslModDir := filepath.Join(opensslDir, "lib", "ossl-modules")
+	if err := os.MkdirAll(opensslBinDir, 0755); err != nil {
+		t.Fatalf("failed to create opensslBinDir: %v", err)
+	}
+	if err := os.MkdirAll(opensslModDir, 0755); err != nil {
+		t.Fatalf("failed to create opensslModDir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(opensslBinDir, "libcrypto-3-x64.dll"), []byte("libcrypto"), 0644); err != nil {
+		t.Fatalf("failed to write libcrypto: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(opensslBinDir, "libssl-3-x64.dll"), []byte("libssl"), 0644); err != nil {
+		t.Fatalf("failed to write libssl: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(opensslModDir, "legacy.dll"), []byte("legacy"), 0644); err != nil {
+		t.Fatalf("failed to write legacy: %v", err)
+	}
+
+	if err := copyWindowsDLLs(mysqlDir, opensslDir, installDir); err != nil {
+		t.Fatalf("copyWindowsDLLs failed: %v", err)
+	}
+
+	for _, name := range []string{"libmysql.dll", "libcrypto-3-x64.dll", "libssl-3-x64.dll", "legacy.dll"} {
+		if _, err := os.Stat(filepath.Join(installDir, name)); err != nil {
+			t.Errorf("expected copied DLL %s to exist in %s", name, installDir)
+		}
+	}
+}
+
 func TestRemoveDistExtensions(t *testing.T) {
 	// Test non-existent directory
 	if err := removeDistExtensions("non_existent_dir_12345"); err != nil {
