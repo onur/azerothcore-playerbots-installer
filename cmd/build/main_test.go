@@ -156,3 +156,64 @@ func TestRemoveDistExtensions(t *testing.T) {
 	checkFile(filepath.Join(modulesDir, "playerbots.conf"), "playerbots-content", true)
 	checkFile(keepFile, "keep-content", true)
 }
+
+func TestCopyDir(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := filepath.Join(t.TempDir(), "target")
+
+	// Create files and nested directories in src
+	nestedDir := filepath.Join(srcDir, "bin")
+	if err := os.MkdirAll(nestedDir, 0755); err != nil {
+		t.Fatalf("failed to create nestedDir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "file1.txt"), []byte("file1"), 0644); err != nil {
+		t.Fatalf("failed to write file1: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "file2.txt"), []byte("file2"), 0644); err != nil {
+		t.Fatalf("failed to write file2: %v", err)
+	}
+
+	if err := copyDir(srcDir, dstDir); err != nil {
+		t.Fatalf("copyDir failed: %v", err)
+	}
+
+	data1, err := os.ReadFile(filepath.Join(dstDir, "file1.txt"))
+	if err != nil || string(data1) != "file1" {
+		t.Errorf("file1 not copied properly: %v, %s", err, string(data1))
+	}
+
+	data2, err := os.ReadFile(filepath.Join(dstDir, "bin", "file2.txt"))
+	if err != nil || string(data2) != "file2" {
+		t.Errorf("file2 not copied properly: %v, %s", err, string(data2))
+	}
+}
+
+func TestCopyMySQL(t *testing.T) {
+	// Missing directory error
+	if err := copyMySQL("", "dist"); err == nil {
+		t.Errorf("expected error for empty mysqlDir, got nil")
+	}
+
+	// Non-existent directory error
+	if err := copyMySQL("non_existent_mysql_dir_12345", "dist"); err == nil {
+		t.Errorf("expected error for non-existent mysqlDir, got nil")
+	}
+
+	// Valid directory copy
+	srcMySQL := t.TempDir()
+	installDir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(srcMySQL, "mysql.exe"), []byte("mysql-binary"), 0755); err != nil {
+		t.Fatalf("failed to write mysql.exe: %v", err)
+	}
+
+	if err := copyMySQL(srcMySQL, installDir); err != nil {
+		t.Fatalf("copyMySQL failed: %v", err)
+	}
+
+	copiedMySQL := filepath.Join(installDir, "mysql", "mysql.exe")
+	data, err := os.ReadFile(copiedMySQL)
+	if err != nil || string(data) != "mysql-binary" {
+		t.Errorf("copied mysql.exe content mismatch: %v, %s", err, string(data))
+	}
+}

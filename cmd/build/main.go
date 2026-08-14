@@ -54,7 +54,43 @@ func copyFile(src, dst string) error {
 		return err
 	}
 
-	return dstFile.Sync()
+	return nil
+}
+
+func copyDir(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if !srcInfo.IsDir() {
+		return fmt.Errorf("%s is not a directory", src)
+	}
+
+	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+		return err
+	}
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		if entry.IsDir() {
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			if err := copyFile(srcPath, dstPath); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 type configOptions struct {
@@ -129,6 +165,30 @@ func copyWindowsDLLs(mysqlDir, opensslDir, installDir string) error {
 		if err := copyFile(dll, dest); err != nil {
 			return fmt.Errorf("failed to copy %s to %s: %w", dll, dest, err)
 		}
+	}
+
+	return nil
+}
+
+func copyMySQL(mysqlDir, installDir string) error {
+	if mysqlDir == "" {
+		return fmt.Errorf("MySQL directory is required on Windows to copy MySQL")
+	}
+
+	mysqlPath, err := filepath.Abs(mysqlDir)
+	if err != nil {
+		return fmt.Errorf("failed to resolve MySQL path %s: %w", mysqlDir, err)
+	}
+
+	info, err := os.Stat(mysqlPath)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("MySQL directory does not exist or is not a directory: %s", mysqlPath)
+	}
+
+	destDir := filepath.Join(installDir, "mysql")
+	fmt.Printf("Copying MySQL from %s to %s\n", mysqlPath, destDir)
+	if err := copyDir(mysqlPath, destDir); err != nil {
+		return fmt.Errorf("failed to copy MySQL directory: %w", err)
 	}
 
 	return nil
@@ -244,9 +304,14 @@ func main() {
 	}
 	runCommand("cmake", cmakeInstallArgs, "")
 
-	// Copy runtime DLL dependencies to dist/ and rename config files (Windows only)
+	// Copy runtime DLL dependencies and MySQL to dist/ and rename config files (Windows only)
 	if runtime.GOOS == "windows" {
 		if err := copyWindowsDLLs(opts.mysqlDir, opts.opensslDir, installDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		if err := copyMySQL(opts.mysqlDir, installDir); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
