@@ -16,37 +16,36 @@ func TestParseArgs(t *testing.T) {
 	}()
 
 	numCPU := runtime.NumCPU()
-	if numCPU < 1 {
-		numCPU = 1
-	}
 
 	tests := []struct {
-		name       string
-		args       []string
-		wantConfig string
-		wantJobs   int
-		wantClean  bool
+		name           string
+		args           []string
+		wantConfig     string
+		wantJobs       int
+		wantMySQLDir   string
+		wantBoostDir   string
+		wantOpenSSLDir string
 	}{
 		{
 			name:       "default values",
 			args:       []string{"cmd"},
 			wantConfig: "RelWithDebInfo",
 			wantJobs:   numCPU,
-			wantClean:  false,
 		},
 		{
 			name:       "short flags",
-			args:       []string{"cmd", "-c", "Release", "-j", "4", "-clean"},
+			args:       []string{"cmd", "-c", "Release", "-j", "4"},
 			wantConfig: "Release",
 			wantJobs:   4,
-			wantClean:  true,
 		},
 		{
-			name:       "long flags with double dash",
-			args:       []string{"cmd", "--config", "Debug", "--jobs", "8"},
-			wantConfig: "Debug",
-			wantJobs:   8,
-			wantClean:  false,
+			name:           "long flags with custom directories",
+			args:           []string{"cmd", "--config", "Debug", "--jobs", "8", "--mysql-dir", "/opt/mysql", "--boost-dir", "/opt/boost", "--openssl-dir", "/opt/openssl"},
+			wantConfig:     "Debug",
+			wantJobs:       8,
+			wantMySQLDir:   "/opt/mysql",
+			wantBoostDir:   "/opt/boost",
+			wantOpenSSLDir: "/opt/openssl",
 		},
 	}
 
@@ -62,9 +61,27 @@ func TestParseArgs(t *testing.T) {
 			if opts.jobs != tt.wantJobs {
 				t.Errorf("jobs = %v, want %v", opts.jobs, tt.wantJobs)
 			}
-			if opts.clean != tt.wantClean {
-				t.Errorf("clean = %v, want %v", opts.clean, tt.wantClean)
+			if tt.wantMySQLDir != "" && opts.mysqlDir != tt.wantMySQLDir {
+				t.Errorf("mysqlDir = %v, want %v", opts.mysqlDir, tt.wantMySQLDir)
+			}
+			if tt.wantBoostDir != "" && opts.boostDir != tt.wantBoostDir {
+				t.Errorf("boostDir = %v, want %v", opts.boostDir, tt.wantBoostDir)
+			}
+			if tt.wantOpenSSLDir != "" && opts.opensslDir != tt.wantOpenSSLDir {
+				t.Errorf("opensslDir = %v, want %v", opts.opensslDir, tt.wantOpenSSLDir)
 			}
 		})
+	}
+}
+
+func TestCopyWindowsDLLsMissingDirs(t *testing.T) {
+	err := copyWindowsDLLs("", "some-openssl", "dist")
+	if err == nil {
+		t.Errorf("expected error when mysqlDir is empty, got nil")
+	}
+
+	err = copyWindowsDLLs("some-mysql", "", "dist")
+	if err == nil {
+		t.Errorf("expected error when opensslDir is empty, got nil")
 	}
 }
