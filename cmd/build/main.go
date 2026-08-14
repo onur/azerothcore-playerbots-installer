@@ -105,8 +105,8 @@ func parseArgs() configOptions {
 	var opts configOptions
 	numCPU := runtime.NumCPU()
 
-	defaultMysql := os.Getenv("MYSQL_ROOT")
-	defaultBoost := os.Getenv("BOOST_ROOT")
+	defaultMysql := os.Getenv("MYSQL_ROOT_DIR")
+	defaultBoost := os.Getenv("BOOST_ROOT_DIR")
 	defaultOpenSSL := os.Getenv("OPENSSL_ROOT_DIR")
 
 	flag.StringVar(&opts.config, "config", "RelWithDebInfo", "Build configuration (e.g., RelWithDebInfo, Release, Debug).")
@@ -115,8 +115,8 @@ func parseArgs() configOptions {
 	flag.IntVar(&opts.jobs, "jobs", numCPU, fmt.Sprintf("Number of parallel build jobs. Default: %d", numCPU))
 	flag.IntVar(&opts.jobs, "j", numCPU, fmt.Sprintf("Number of parallel build jobs (shorthand). Default: %d", numCPU))
 
-	flag.StringVar(&opts.mysqlDir, "mysql-dir", defaultMysql, "Path to MySQL root directory. Default: $env:MYSQL_ROOT")
-	flag.StringVar(&opts.boostDir, "boost-dir", defaultBoost, "Path to Boost root directory. Default: $env:BOOST_ROOT")
+	flag.StringVar(&opts.mysqlDir, "mysql-dir", defaultMysql, "Path to MySQL root directory. Default: $env:MYSQL_ROOT_DIR")
+	flag.StringVar(&opts.boostDir, "boost-dir", defaultBoost, "Path to Boost root directory. Default: $env:BOOST_ROOT_DIR")
 	flag.StringVar(&opts.opensslDir, "openssl-dir", defaultOpenSSL, "Path to OpenSSL root directory. Default: $env:OPENSSL_ROOT_DIR")
 
 	flag.Usage = func() {

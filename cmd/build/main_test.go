@@ -75,6 +75,33 @@ func TestParseArgs(t *testing.T) {
 	}
 }
 
+func TestParseArgsEnvVars(t *testing.T) {
+	origArgs := os.Args
+	origCommandLine := flag.CommandLine
+	defer func() {
+		os.Args = origArgs
+		flag.CommandLine = origCommandLine
+	}()
+
+	t.Setenv("MYSQL_ROOT_DIR", "/env/mysql")
+	t.Setenv("BOOST_ROOT_DIR", "/env/boost")
+	t.Setenv("OPENSSL_ROOT_DIR", "/env/openssl")
+
+	os.Args = []string{"cmd"}
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	opts := parseArgs()
+
+	if opts.mysqlDir != "/env/mysql" {
+		t.Errorf("mysqlDir = %v, want %v", opts.mysqlDir, "/env/mysql")
+	}
+	if opts.boostDir != "/env/boost" {
+		t.Errorf("boostDir = %v, want %v", opts.boostDir, "/env/boost")
+	}
+	if opts.opensslDir != "/env/openssl" {
+		t.Errorf("opensslDir = %v, want %v", opts.opensslDir, "/env/openssl")
+	}
+}
+
 func TestCopyWindowsDLLsMissingDirs(t *testing.T) {
 	err := copyWindowsDLLs("", "some-openssl", "dist")
 	if err == nil {
