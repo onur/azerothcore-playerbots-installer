@@ -208,21 +208,12 @@ func isDataDirInitialized(dataDir string) bool {
 		return false
 	}
 
-	// Check for core markers of an initialized MySQL data directory
-	markers := []string{"mysql", "ibdata1", "auto.cnf"}
-	for _, marker := range markers {
-		if _, err := os.Stat(filepath.Join(dataDir, marker)); err == nil {
-			return true
-		}
-	}
-
-	// Also check if directory is non-empty
 	entries, err := os.ReadDir(dataDir)
 	if err != nil || len(entries) == 0 {
 		return false
 	}
 
-	return false
+	return true
 }
 
 func initializeMySQL(binaries *mysqlBinaries, dataDir string) error {
@@ -235,7 +226,7 @@ func initializeMySQL(binaries *mysqlBinaries, dataDir string) error {
 		return fmt.Errorf("failed to create data directory %s: %w", absDataDir, err)
 	}
 
-	fmt.Printf("=== [1/3] Initializing MySQL data directory at %s ===\n", absDataDir)
+	fmt.Printf("=== [1/4] Initializing MySQL data directory at %s ===\n", absDataDir)
 
 	args := []string{
 		"--initialize-insecure",
@@ -267,7 +258,7 @@ func startMySQLServer(binaries *mysqlBinaries, dataDir string, port int) (*exec.
 		"--console",
 	}
 
-	fmt.Printf("=== [2/3] Starting MySQL server (Port: %d) ===\n", port)
+	fmt.Printf("=== [2/4] Starting MySQL server (Port: %d) ===\n", port)
 	cmd := exec.Command(binaries.mysqld, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -326,7 +317,7 @@ func runEmbeddedSQL(binaries *mysqlBinaries, port int, sqlContent string) error 
 		return errors.New("embedded SQL content is empty")
 	}
 
-	fmt.Println("\n=== [3/3] Applying embedded create_mysql.sql ===")
+	fmt.Println("\n=== [3/4] Applying create_mysql.sql ===")
 
 	args := []string{
 		"-u", "root",
@@ -343,12 +334,40 @@ func runEmbeddedSQL(binaries *mysqlBinaries, port int, sqlContent string) error 
 		return fmt.Errorf("failed to execute embedded SQL script: %w", err)
 	}
 
-	fmt.Println("AzerothCore databases and user 'acore' created successfully.")
+	fmt.Println("AzerothCore databases and user 'acore' ready.")
 	return nil
 }
 
+func startServerProcess(name, exePath, workDir string, stdin *os.File) (*exec.Cmd, error) {
+	cmd := exec.Command(exePath)
+	if workDir != "" {
+		cmd.Dir = workDir
+	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if stdin != nil {
+		cmd.Stdin = stdin
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start %s: %w", name, err)
+	}
+
+	fmt.Printf("%s started successfully (PID: %d).\n", name, cmd.Process.Pid)
+	return cmd, nil
+}
+
+func stopProcess(name string, cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+
+	fmt.Printf("Stopping %s (PID: %d)...\n", name, cmd.Process.Pid)
+	_ = cmd.Process.Kill()
+}
+
 func shutdownMySQL(binaries *mysqlBinaries, port int, cmd *exec.Cmd) error {
-	fmt.Println("\nShutting down MySQL server...")
+	fmt.Println("Shutting down MySQL server...")
 
 	args := []string{
 		"-u", "root",
@@ -380,6 +399,29 @@ func shutdownMySQL(binaries *mysqlBinaries, port int, cmd *exec.Cmd) error {
 	return nil
 }
 
+func findBaseDir() string {
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		if fileExists(filepath.Join(exeDir, "authserver.exe")) || fileExists(filepath.Join(exeDir, "authserver")) {
+			return exeDir
+		}
+	}
+
+	if fileExists("authserver.exe") || fileExists("authserver") {
+		if abs, err := filepath.Abs("."); err == nil {
+			return abs
+		}
+	}
+
+	if fileExists(filepath.Join("dist", "authserver.exe")) || fileExists(filepath.Join("dist", "authserver")) {
+		if abs, err := filepath.Abs("dist"); err == nil {
+			return abs
+		}
+	}
+
+	return "."
+}
+
 func main() {
 	opts, err := parseArgs(os.Args[1:])
 	if err != nil {
@@ -394,6 +436,21 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
+	}
+
+	baseDir := findBaseDir()
+	authserverExe := findExecutable(baseDir, "authserver")
+	worldserverExe := findExecutable(baseDir, "worldserver")
+
+	if !opts.initOnly {
+		if authserverExe == "" {
+			fmt.Fprintf(os.Stderr, "Error: authserver executable not found in %s or PATH\n", baseDir)
+			os.Exit(1)
+		}
+		if worldserverExe == "" {
+			fmt.Fprintf(os.Stderr, "Error: worldserver executable not found in %s or PATH\n", baseDir)
+			os.Exit(1)
+		}
 	}
 
 	// 1. Initialize data directory if needed
@@ -413,21 +470,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Setup channel for process exit
-	serverExited := make(chan error, 1)
+	// Setup channel for MySQL exit
+	mysqlExited := make(chan error, 1)
 	go func() {
-		serverExited <- mysqlCmd.Wait()
+		mysqlExited <- mysqlCmd.Wait()
 	}()
 
 	// 3. Wait for MySQL to become ready
 	timeoutDuration := time.Duration(opts.timeout) * time.Second
-	if err := waitForMySQLReady(binaries, opts.port, timeoutDuration, serverExited); err != nil {
+	if err := waitForMySQLReady(binaries, opts.port, timeoutDuration, mysqlExited); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		_ = shutdownMySQL(binaries, opts.port, mysqlCmd)
 		os.Exit(1)
 	}
 
-	// 4. Apply embedded SQL script
+	// 4. Apply SQL script
 	if !opts.skipSQL {
 		if err := runEmbeddedSQL(binaries, opts.port, createMySQLSQL); err != nil {
 			fmt.Fprintf(os.Stderr, "Error applying SQL: %v\n", err)
@@ -443,10 +500,43 @@ func main() {
 		os.Exit(0)
 	}
 
-	// 6. Keep running and listen for termination signals
+	// 6. Start authserver and worldserver
+	fmt.Println("\n=== [4/4] Starting authserver and worldserver ===")
+
+	authCmd, err := startServerProcess("authserver", authserverExe, baseDir, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error starting authserver: %v\n", err)
+		_ = shutdownMySQL(binaries, opts.port, mysqlCmd)
+		os.Exit(1)
+	}
+
+	worldCmd, err := startServerProcess("worldserver", worldserverExe, baseDir, os.Stdin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error starting worldserver: %v\n", err)
+		stopProcess("authserver", authCmd)
+		_ = shutdownMySQL(binaries, opts.port, mysqlCmd)
+		os.Exit(1)
+	}
+
+	type processExit struct {
+		name string
+		err  error
+	}
+	procExitChan := make(chan processExit, 3)
+
+	go func() {
+		procExitChan <- processExit{name: "authserver", err: authCmd.Wait()}
+	}()
+	go func() {
+		procExitChan <- processExit{name: "worldserver", err: worldCmd.Wait()}
+	}()
+	go func() {
+		procExitChan <- processExit{name: "mysqld", err: <-mysqlExited}
+	}()
+
 	fmt.Println("\n========================================================")
-	fmt.Println(" Server startup initialized successfully.")
-	fmt.Println(" MySQL running in console mode. Press Ctrl+C to stop.")
+	fmt.Println(" All servers running. You can type commands into console.")
+	fmt.Println(" Press Ctrl+C to shut down all servers.")
 	fmt.Println("========================================================")
 
 	sigChan := make(chan os.Signal, 1)
@@ -454,13 +544,19 @@ func main() {
 
 	select {
 	case sig := <-sigChan:
-		fmt.Printf("\nReceived signal (%v). Initiating shutdown...\n", sig)
+		fmt.Printf("\nReceived signal (%v). Shutting down all servers...\n", sig)
+		stopProcess("worldserver", worldCmd)
+		stopProcess("authserver", authCmd)
 		_ = shutdownMySQL(binaries, opts.port, mysqlCmd)
-	case err := <-serverExited:
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "\nMySQL server exited unexpectedly: %v\n", err)
-			os.Exit(1)
+	case exitEvent := <-procExitChan:
+		if exitEvent.err != nil {
+			fmt.Fprintf(os.Stderr, "\n%s exited unexpectedly: %v\n", exitEvent.name, exitEvent.err)
+		} else {
+			fmt.Printf("\n%s process stopped.\n", exitEvent.name)
 		}
-		fmt.Println("\nMySQL server process exited.")
+		fmt.Println("Shutting down remaining servers...")
+		stopProcess("worldserver", worldCmd)
+		stopProcess("authserver", authCmd)
+		_ = shutdownMySQL(binaries, opts.port, mysqlCmd)
 	}
 }
