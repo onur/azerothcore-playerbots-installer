@@ -223,6 +223,21 @@ func removeDistExtensions(dir string) error {
 	})
 }
 
+func buildStartup(installDir string) error {
+	outputPath := filepath.Join(installDir, "startup.exe")
+	fmt.Printf("Building startup executable: %s\n", outputPath)
+
+	cmd := exec.Command("go", "build", "-o", outputPath, "./cmd/startup")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to build startup binary: %w", err)
+	}
+
+	return nil
+}
+
 func main() {
 	opts := parseArgs()
 
@@ -305,7 +320,7 @@ func main() {
 	}
 	runCommand("cmake", cmakeInstallArgs, "")
 
-	// Copy runtime DLL dependencies and MySQL to dist/ and rename config files (Windows only)
+	// Windows-specific packaging: DLLs, MySQL distribution, config renaming, and startup tool
 	if runtime.GOOS == "windows" {
 		if err := copyWindowsDLLs(opts.mysqlDir, opts.opensslDir, installDir); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -319,6 +334,11 @@ func main() {
 
 		configsDir := filepath.Join(installDir, "configs")
 		if err := removeDistExtensions(configsDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		if err := buildStartup(installDir); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
