@@ -1,0 +1,8 @@
+[submodule "azerothcore-wotlk"]
+	path = azerothcore-wotlk
+	url = https://github.com/mod-playerbots/azerothcore-wotlk.git
+	branch = Playerbot
+[submodule "mod-playerbots"]
+	path = mod-playerbots
+	url = https://github.com/mod-playerbots/mod-playerbots.git
+	branch = master
