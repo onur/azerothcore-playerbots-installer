@@ -134,6 +134,34 @@ func copyWindowsDLLs(mysqlDir, opensslDir, installDir string) error {
 	return nil
 }
 
+func removeDistExtensions(dir string) error {
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return nil
+	}
+
+	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(path, ".dist") {
+			target := strings.TrimSuffix(path, ".dist")
+			fmt.Printf("Renaming %s to %s\n", filepath.Base(path), filepath.Base(target))
+			if _, err := os.Stat(target); err == nil {
+				if err := os.Remove(target); err != nil {
+					return fmt.Errorf("failed to remove existing file %s: %w", target, err)
+				}
+			}
+			if err := os.Rename(path, target); err != nil {
+				return fmt.Errorf("failed to rename %s to %s: %w", path, target, err)
+			}
+		}
+		return nil
+	})
+}
+
 func main() {
 	opts := parseArgs()
 
@@ -216,9 +244,15 @@ func main() {
 	}
 	runCommand("cmake", cmakeInstallArgs, "")
 
-	// Copy runtime DLL dependencies to dist/ (Windows only)
+	// Copy runtime DLL dependencies to dist/ and rename config files (Windows only)
 	if runtime.GOOS == "windows" {
 		if err := copyWindowsDLLs(opts.mysqlDir, opts.opensslDir, installDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		configsDir := filepath.Join(installDir, "configs")
+		if err := removeDistExtensions(configsDir); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
