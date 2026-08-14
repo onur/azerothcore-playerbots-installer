@@ -17,6 +17,10 @@ import (
 )
 
 const createMySQLSQL = `
+SET GLOBAL innodb_redo_log_capacity = 2 * 1024 * 1024 * 1024;
+SET GLOBAL innodb_io_capacity = 2000;
+SET GLOBAL innodb_io_capacity_max = 4000;
+
 CREATE USER IF NOT EXISTS 'acore'@'localhost' IDENTIFIED BY 'acore' WITH MAX_QUERIES_PER_HOUR 0 MAX_CONNECTIONS_PER_HOUR 0 MAX_UPDATES_PER_HOUR 0;
 
 CREATE DATABASE IF NOT EXISTS ` + "`acore_world`" + ` DEFAULT CHARACTER SET UTF8MB4 COLLATE utf8mb4_unicode_ci;
@@ -34,6 +38,7 @@ type startupOptions struct {
 	mysqlDir string
 	dataDir  string
 	port     int
+	authPort int
 	timeout  int
 	initOnly bool
 	skipSQL  bool
@@ -122,6 +127,7 @@ func parseArgs(args []string) (startupOptions, error) {
 	fs.StringVar(&opts.mysqlDir, "mysql-dir", defaultMysql, "Path to MySQL root directory. Default: ./mysql or $env:MYSQL_ROOT")
 	fs.StringVar(&opts.dataDir, "data-dir", "", "Path to MySQL data directory. Default: <mysql-dir>/data")
 	fs.IntVar(&opts.port, "port", 3306, "MySQL server port.")
+	fs.IntVar(&opts.authPort, "auth-port", 3724, "Authserver realm port.")
 	fs.IntVar(&opts.timeout, "timeout", 30, "Timeout in seconds to wait for MySQL to become ready.")
 	fs.BoolVar(&opts.initOnly, "init-only", false, "Initialize MySQL data dir, start server, apply SQL script, and exit.")
 	fs.BoolVar(&opts.skipSQL, "skip-sql", false, "Skip executing the embedded create_mysql.sql script.")
@@ -255,6 +261,13 @@ func startMySQLServer(binaries *mysqlBinaries, dataDir string, port int) (*exec.
 	args := []string{
 		fmt.Sprintf("--datadir=%s", absDataDir),
 		fmt.Sprintf("--port=%d", port),
+		"--innodb-redo-log-capacity=2147483648",
+		"--innodb-buffer-pool-size=1073741824",
+		"--innodb-flush-log-at-trx-commit=2",
+		"--innodb-io-capacity=2000",
+		"--innodb-io-capacity-max=4000",
+		"--innodb-log-buffer-size=67108864",
+		"--max-allowed-packet=1073741824",
 		"--console",
 	}
 
@@ -306,6 +319,35 @@ func waitForMySQLReady(binaries *mysqlBinaries, port int, timeout time.Duration,
 			pingCmd := exec.Command(binaries.mysqladmin, args...)
 			if err := pingCmd.Run(); err == nil {
 				fmt.Println("MySQL server is online and ready.")
+				return nil
+			}
+		}
+	}
+}
+
+func waitForAuthServerReady(port int, timeout time.Duration, serverExited <-chan error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	fmt.Printf("Waiting for authserver to initialize and listen on port %d...\n", port)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for authserver on port %d after %v", port, timeout)
+		case err := <-serverExited:
+			if err != nil {
+				return fmt.Errorf("authserver exited unexpectedly: %w", err)
+			}
+			return errors.New("authserver exited unexpectedly")
+		case <-ticker.C:
+			conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 500*time.Millisecond)
+			if err == nil {
+				conn.Close()
+				fmt.Println("Authserver is online and ready.")
 				return nil
 			}
 		}
@@ -500,12 +542,29 @@ func main() {
 		os.Exit(0)
 	}
 
-	// 6. Start authserver and worldserver
+	// 6. Start authserver and worldserver (staggered)
 	fmt.Println("\n=== [4/4] Starting authserver and worldserver ===")
 
 	authCmd, err := startServerProcess("authserver", authserverExe, baseDir, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error starting authserver: %v\n", err)
+		_ = shutdownMySQL(binaries, opts.port, mysqlCmd)
+		os.Exit(1)
+	}
+
+	authExited := make(chan error, 1)
+	go func() {
+		authExited <- authCmd.Wait()
+	}()
+
+	authTimeout := time.Duration(opts.timeout*2) * time.Second
+	if authTimeout < 60*time.Second {
+		authTimeout = 60 * time.Second
+	}
+
+	if err := waitForAuthServerReady(opts.authPort, authTimeout, authExited); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		stopProcess("authserver", authCmd)
 		_ = shutdownMySQL(binaries, opts.port, mysqlCmd)
 		os.Exit(1)
 	}
@@ -518,6 +577,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	worldExited := make(chan error, 1)
+	go func() {
+		worldExited <- worldCmd.Wait()
+	}()
+
 	type processExit struct {
 		name string
 		err  error
@@ -525,10 +589,10 @@ func main() {
 	procExitChan := make(chan processExit, 3)
 
 	go func() {
-		procExitChan <- processExit{name: "authserver", err: authCmd.Wait()}
+		procExitChan <- processExit{name: "authserver", err: <-authExited}
 	}()
 	go func() {
-		procExitChan <- processExit{name: "worldserver", err: worldCmd.Wait()}
+		procExitChan <- processExit{name: "worldserver", err: <-worldExited}
 	}()
 	go func() {
 		procExitChan <- processExit{name: "mysqld", err: <-mysqlExited}

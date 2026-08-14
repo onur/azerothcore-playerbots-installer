@@ -13,6 +13,9 @@ func TestSQLContent(t *testing.T) {
 	}
 
 	requiredSubstrings := []string{
+		"SET GLOBAL innodb_redo_log_capacity = 2 * 1024 * 1024 * 1024;",
+		"SET GLOBAL innodb_io_capacity = 2000;",
+		"SET GLOBAL innodb_io_capacity_max = 4000;",
 		"CREATE USER IF NOT EXISTS 'acore'@'localhost'",
 		"CREATE DATABASE IF NOT EXISTS `acore_world`",
 		"CREATE DATABASE IF NOT EXISTS `acore_characters`",
@@ -39,6 +42,10 @@ func TestParseArgsDefaults(t *testing.T) {
 		t.Errorf("port = %d, want 3306", opts.port)
 	}
 
+	if opts.authPort != 3724 {
+		t.Errorf("authPort = %d, want 3724", opts.authPort)
+	}
+
 	if opts.timeout != 30 {
 		t.Errorf("timeout = %d, want 30", opts.timeout)
 	}
@@ -60,6 +67,7 @@ func TestParseArgsCustomFlags(t *testing.T) {
 		"-mysql-dir", customDir,
 		"-data-dir", customData,
 		"-port", "3307",
+		"-auth-port", "3725",
 		"-timeout", "45",
 		"-init-only",
 		"-skip-sql",
@@ -80,6 +88,10 @@ func TestParseArgsCustomFlags(t *testing.T) {
 
 	if opts.port != 3307 {
 		t.Errorf("port = %d, want 3307", opts.port)
+	}
+
+	if opts.authPort != 3725 {
+		t.Errorf("authPort = %d, want 3725", opts.authPort)
 	}
 
 	if opts.timeout != 45 {
