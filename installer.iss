@@ -1,6 +1,6 @@
 [Setup]
 AppName=Playerbots AzerothCore Server
-AppVersion=1.0.0
+AppVersion=0.1
 DefaultDirName={autopf}\Playerbots
 DefaultGroupName=Playerbots
 OutputDir=output
@@ -13,7 +13,6 @@ DisableReadyPage=yes
 UsePreviousTasks=yes
 
 [Files]
-; Distribute all files and subdirectories from the dist directory
 Source: "dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Tasks]
@@ -22,10 +21,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Icons]
 Name: "{group}\Playerbots Server Launcher"; Filename: "{app}\startup.exe"; WorkingDir: "{app}"
-Name: "{commondesktop}\Playerbots Launcher"; Filename: "{app}\startup.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{commondesktop}\Playerbots Server Launcher"; Filename: "{app}\startup.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-; Option to launch startup.exe right after installation finishes
 Filename: "{app}\startup.exe"; Description: "Launch Playerbots Server"; Flags: nowait postinstall skipifsilent
 
 [Code]
