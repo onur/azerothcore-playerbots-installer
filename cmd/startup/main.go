@@ -12,15 +12,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
 
 const createMySQLSQL = `
-SET GLOBAL innodb_redo_log_capacity = 2 * 1024 * 1024 * 1024;
-SET GLOBAL innodb_io_capacity = 2000;
-SET GLOBAL innodb_io_capacity_max = 4000;
-
 CREATE USER IF NOT EXISTS 'acore'@'localhost' IDENTIFIED BY 'acore' WITH MAX_QUERIES_PER_HOUR 0 MAX_CONNECTIONS_PER_HOUR 0 MAX_UPDATES_PER_HOUR 0;
 
 CREATE DATABASE IF NOT EXISTS ` + "`acore_world`" + ` DEFAULT CHARACTER SET UTF8MB4 COLLATE utf8mb4_unicode_ci;
@@ -49,6 +46,119 @@ type mysqlBinaries struct {
 	mysql      string
 	mysqladmin string
 	dir        string
+}
+
+type ProcessSupervisor struct {
+	name         string
+	startFunc    func() (*exec.Cmd, error)
+	restartDelay time.Duration
+
+	mu         sync.Mutex
+	currentCmd *exec.Cmd
+	stopped    bool
+}
+
+func newProcessSupervisor(name string, startFunc func() (*exec.Cmd, error), restartDelay time.Duration) *ProcessSupervisor {
+	return &ProcessSupervisor{
+		name:         name,
+		startFunc:    startFunc,
+		restartDelay: restartDelay,
+	}
+}
+
+func (ps *ProcessSupervisor) SetCurrentCmd(cmd *exec.Cmd) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.currentCmd = cmd
+}
+
+func (ps *ProcessSupervisor) GetCurrentCmd() *exec.Cmd {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	return ps.currentCmd
+}
+
+func (ps *ProcessSupervisor) Stop() {
+	ps.mu.Lock()
+	ps.stopped = true
+	cmd := ps.currentCmd
+	ps.mu.Unlock()
+
+	if cmd != nil && cmd.Process != nil {
+		fmt.Printf("Stopping %s (PID: %d)...\n", ps.name, cmd.Process.Pid)
+		_ = cmd.Process.Kill()
+	}
+}
+
+func (ps *ProcessSupervisor) Run(ctx context.Context, initialCmd *exec.Cmd, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	cmd := initialCmd
+	for {
+		if cmd == nil {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			var err error
+			cmd, err = ps.startFunc()
+			if err != nil {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					fmt.Fprintf(os.Stderr, "Failed to start %s: %v\n", ps.name, err)
+				}
+
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(ps.restartDelay):
+					continue
+				}
+			}
+		}
+
+		ps.mu.Lock()
+		if ps.stopped || ctx.Err() != nil {
+			ps.mu.Unlock()
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+			return
+		}
+		ps.currentCmd = cmd
+		ps.mu.Unlock()
+
+		err := cmd.Wait()
+
+		ps.mu.Lock()
+		ps.currentCmd = nil
+		stopped := ps.stopped
+		ps.mu.Unlock()
+
+		if stopped || ctx.Err() != nil {
+			return
+		}
+
+		if err != nil {
+			fmt.Printf("\n[%s] Process exited: %v\n", ps.name, err)
+		} else {
+			fmt.Printf("\n[%s] Process stopped.\n", ps.name)
+		}
+
+		fmt.Printf("[%s] Restarting in %v...\n", ps.name, ps.restartDelay)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(ps.restartDelay):
+		}
+
+		cmd = nil
+	}
 }
 
 func dirExists(path string) bool {
@@ -261,17 +371,10 @@ func startMySQLServer(binaries *mysqlBinaries, dataDir string, port int) (*exec.
 	args := []string{
 		fmt.Sprintf("--datadir=%s", absDataDir),
 		fmt.Sprintf("--port=%d", port),
-		"--innodb-redo-log-capacity=2147483648",
-		"--innodb-buffer-pool-size=1073741824",
-		"--innodb-flush-log-at-trx-commit=2",
-		"--innodb-io-capacity=2000",
-		"--innodb-io-capacity-max=4000",
-		"--innodb-log-buffer-size=67108864",
-		"--max-allowed-packet=1073741824",
 		"--console",
 	}
 
-	fmt.Printf("=== [2/4] Starting MySQL server (Port: %d) ===\n", port)
+	fmt.Printf("=== Starting MySQL server (Port: %d) ===\n", port)
 	cmd := exec.Command(binaries.mysqld, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -283,7 +386,7 @@ func startMySQLServer(binaries *mysqlBinaries, dataDir string, port int) (*exec.
 	return cmd, nil
 }
 
-func waitForMySQLReady(binaries *mysqlBinaries, port int, timeout time.Duration, serverExited <-chan error) error {
+func waitForMySQLReady(binaries *mysqlBinaries, port int, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -296,11 +399,6 @@ func waitForMySQLReady(binaries *mysqlBinaries, port int, timeout time.Duration,
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("timed out waiting for MySQL server after %v", timeout)
-		case err := <-serverExited:
-			if err != nil {
-				return fmt.Errorf("MySQL server exited unexpectedly: %w", err)
-			}
-			return errors.New("MySQL server exited unexpectedly")
 		case <-ticker.C:
 			// Check TCP port connectivity
 			conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 500*time.Millisecond)
@@ -325,7 +423,7 @@ func waitForMySQLReady(binaries *mysqlBinaries, port int, timeout time.Duration,
 	}
 }
 
-func waitForAuthServerReady(port int, timeout time.Duration, serverExited <-chan error) error {
+func waitForAuthServerReady(port int, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -338,11 +436,6 @@ func waitForAuthServerReady(port int, timeout time.Duration, serverExited <-chan
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("timed out waiting for authserver on port %d after %v", port, timeout)
-		case err := <-serverExited:
-			if err != nil {
-				return fmt.Errorf("authserver exited unexpectedly: %w", err)
-			}
-			return errors.New("authserver exited unexpectedly")
 		case <-ticker.C:
 			conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 500*time.Millisecond)
 			if err == nil {
@@ -408,7 +501,25 @@ func stopProcess(name string, cmd *exec.Cmd) {
 	_ = cmd.Process.Kill()
 }
 
-func shutdownMySQL(binaries *mysqlBinaries, port int, cmd *exec.Cmd) error {
+func shutdownMySQL(binaries *mysqlBinaries, port int) error {
+	fmt.Println("Shutting down MySQL server...")
+
+	args := []string{
+		"-u", "root",
+		"-P", fmt.Sprintf("%d", port),
+		"--protocol=tcp",
+		"shutdown",
+	}
+
+	shutdownCmd := exec.Command(binaries.mysqladmin, args...)
+	shutdownCmd.Stdout = os.Stdout
+	shutdownCmd.Stderr = os.Stderr
+	_ = shutdownCmd.Run()
+
+	return nil
+}
+
+func shutdownMySQLAndWait(binaries *mysqlBinaries, port int, cmd *exec.Cmd) error {
 	fmt.Println("Shutting down MySQL server...")
 
 	args := []string{
@@ -425,12 +536,16 @@ func shutdownMySQL(binaries *mysqlBinaries, port int, cmd *exec.Cmd) error {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- cmd.Wait()
+		if cmd != nil {
+			done <- cmd.Wait()
+		} else {
+			done <- nil
+		}
 	}()
 
 	select {
 	case <-time.After(10 * time.Second):
-		if cmd.Process != nil {
+		if cmd != nil && cmd.Process != nil {
 			fmt.Println("MySQL did not stop within 10s, terminating process...")
 			_ = cmd.Process.Kill()
 		}
@@ -506,23 +621,18 @@ func main() {
 	}
 
 	// 2. Start MySQL Server
+	fmt.Println("\n=== [2/4] Starting MySQL server ===")
 	mysqlCmd, err := startMySQLServer(binaries, opts.dataDir, opts.port)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error starting MySQL: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Setup channel for MySQL exit
-	mysqlExited := make(chan error, 1)
-	go func() {
-		mysqlExited <- mysqlCmd.Wait()
-	}()
-
 	// 3. Wait for MySQL to become ready
 	timeoutDuration := time.Duration(opts.timeout) * time.Second
-	if err := waitForMySQLReady(binaries, opts.port, timeoutDuration, mysqlExited); err != nil {
+	if err := waitForMySQLReady(binaries, opts.port, timeoutDuration); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		_ = shutdownMySQL(binaries, opts.port, mysqlCmd)
+		_ = shutdownMySQLAndWait(binaries, opts.port, mysqlCmd)
 		os.Exit(1)
 	}
 
@@ -530,7 +640,7 @@ func main() {
 	if !opts.skipSQL {
 		if err := runEmbeddedSQL(binaries, opts.port, createMySQLSQL); err != nil {
 			fmt.Fprintf(os.Stderr, "Error applying SQL: %v\n", err)
-			_ = shutdownMySQL(binaries, opts.port, mysqlCmd)
+			_ = shutdownMySQLAndWait(binaries, opts.port, mysqlCmd)
 			os.Exit(1)
 		}
 	}
@@ -538,7 +648,7 @@ func main() {
 	// 5. If init-only, shutdown and exit
 	if opts.initOnly {
 		fmt.Println("\nInit-only mode complete. Shutting down MySQL...")
-		_ = shutdownMySQL(binaries, opts.port, mysqlCmd)
+		_ = shutdownMySQLAndWait(binaries, opts.port, mysqlCmd)
 		os.Exit(0)
 	}
 
@@ -548,24 +658,19 @@ func main() {
 	authCmd, err := startServerProcess("authserver", authserverExe, baseDir, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error starting authserver: %v\n", err)
-		_ = shutdownMySQL(binaries, opts.port, mysqlCmd)
+		_ = shutdownMySQLAndWait(binaries, opts.port, mysqlCmd)
 		os.Exit(1)
 	}
-
-	authExited := make(chan error, 1)
-	go func() {
-		authExited <- authCmd.Wait()
-	}()
 
 	authTimeout := time.Duration(opts.timeout*2) * time.Second
 	if authTimeout < 60*time.Second {
 		authTimeout = 60 * time.Second
 	}
 
-	if err := waitForAuthServerReady(opts.authPort, authTimeout, authExited); err != nil {
+	if err := waitForAuthServerReady(opts.authPort, authTimeout); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		stopProcess("authserver", authCmd)
-		_ = shutdownMySQL(binaries, opts.port, mysqlCmd)
+		_ = shutdownMySQLAndWait(binaries, opts.port, mysqlCmd)
 		os.Exit(1)
 	}
 
@@ -573,54 +678,78 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error starting worldserver: %v\n", err)
 		stopProcess("authserver", authCmd)
-		_ = shutdownMySQL(binaries, opts.port, mysqlCmd)
+		_ = shutdownMySQLAndWait(binaries, opts.port, mysqlCmd)
 		os.Exit(1)
 	}
 
-	worldExited := make(chan error, 1)
-	go func() {
-		worldExited <- worldCmd.Wait()
-	}()
+	// 7. Setup supervisors with auto-restart capability
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	type processExit struct {
-		name string
-		err  error
-	}
-	procExitChan := make(chan processExit, 3)
+	var wg sync.WaitGroup
 
-	go func() {
-		procExitChan <- processExit{name: "authserver", err: <-authExited}
-	}()
-	go func() {
-		procExitChan <- processExit{name: "worldserver", err: <-worldExited}
-	}()
-	go func() {
-		procExitChan <- processExit{name: "mysqld", err: <-mysqlExited}
-	}()
+	mysqlSupervisor := newProcessSupervisor("mysqld", func() (*exec.Cmd, error) {
+		cmd, err := startMySQLServer(binaries, opts.dataDir, opts.port)
+		if err != nil {
+			return nil, err
+		}
+		if err := waitForMySQLReady(binaries, opts.port, 30*time.Second); err != nil {
+			_ = cmd.Process.Kill()
+			return nil, err
+		}
+		return cmd, nil
+	}, 2*time.Second)
+
+	authSupervisor := newProcessSupervisor("authserver", func() (*exec.Cmd, error) {
+		return startServerProcess("authserver", authserverExe, baseDir, nil)
+	}, 2*time.Second)
+
+	worldSupervisor := newProcessSupervisor("worldserver", func() (*exec.Cmd, error) {
+		return startServerProcess("worldserver", worldserverExe, baseDir, os.Stdin)
+	}, 2*time.Second)
+
+	wg.Add(3)
+	go mysqlSupervisor.Run(ctx, mysqlCmd, &wg)
+	go authSupervisor.Run(ctx, authCmd, &wg)
+	go worldSupervisor.Run(ctx, worldCmd, &wg)
 
 	fmt.Println("\n========================================================")
 	fmt.Println(" All servers running. You can type commands into console.")
+	fmt.Println(" Worldserver and authserver will auto-restart if exited.")
 	fmt.Println(" Press Ctrl+C to shut down all servers.")
 	fmt.Println("========================================================")
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
+	sig := <-sigChan
+	fmt.Printf("\nReceived signal (%v). Shutting down all servers...\n", sig)
+	cancel()
+
+	worldSupervisor.Stop()
+	authSupervisor.Stop()
+
+	mysqlSupervisor.mu.Lock()
+	mysqlSupervisor.stopped = true
+	currentMysqlCmd := mysqlSupervisor.currentCmd
+	mysqlSupervisor.mu.Unlock()
+
+	_ = shutdownMySQL(binaries, opts.port)
+
+	waitDone := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(waitDone)
+	}()
+
 	select {
-	case sig := <-sigChan:
-		fmt.Printf("\nReceived signal (%v). Shutting down all servers...\n", sig)
-		stopProcess("worldserver", worldCmd)
-		stopProcess("authserver", authCmd)
-		_ = shutdownMySQL(binaries, opts.port, mysqlCmd)
-	case exitEvent := <-procExitChan:
-		if exitEvent.err != nil {
-			fmt.Fprintf(os.Stderr, "\n%s exited unexpectedly: %v\n", exitEvent.name, exitEvent.err)
-		} else {
-			fmt.Printf("\n%s process stopped.\n", exitEvent.name)
+	case <-waitDone:
+		fmt.Println("All servers stopped cleanly.")
+	case <-time.After(10 * time.Second):
+		fmt.Println("Shutdown timed out after 10s, terminating remaining processes...")
+		if currentMysqlCmd != nil && currentMysqlCmd.Process != nil {
+			_ = currentMysqlCmd.Process.Kill()
 		}
-		fmt.Println("Shutting down remaining servers...")
-		stopProcess("worldserver", worldCmd)
-		stopProcess("authserver", authCmd)
-		_ = shutdownMySQL(binaries, opts.port, mysqlCmd)
 	}
 }
+

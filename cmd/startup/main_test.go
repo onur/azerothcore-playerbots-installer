@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestSQLContent(t *testing.T) {
@@ -13,9 +18,6 @@ func TestSQLContent(t *testing.T) {
 	}
 
 	requiredSubstrings := []string{
-		"SET GLOBAL innodb_redo_log_capacity = 2 * 1024 * 1024 * 1024;",
-		"SET GLOBAL innodb_io_capacity = 2000;",
-		"SET GLOBAL innodb_io_capacity_max = 4000;",
 		"CREATE USER IF NOT EXISTS 'acore'@'localhost'",
 		"CREATE DATABASE IF NOT EXISTS `acore_world`",
 		"CREATE DATABASE IF NOT EXISTS `acore_characters`",
@@ -208,3 +210,113 @@ func TestDirExistsAndFileExists(t *testing.T) {
 		t.Errorf("fileExists(\"\") = true, want false")
 	}
 }
+
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	os.Exit(0)
+}
+
+func TestProcessSupervisorAutoRestart(t *testing.T) {
+	var startCount atomic.Int32
+
+	startFunc := func() (*exec.Cmd, error) {
+		startCount.Add(1)
+		cmd := exec.Command(os.Args[0], "-test.run=TestHelperProcess", "--")
+		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+		if err := cmd.Start(); err != nil {
+			return nil, err
+		}
+		return cmd, nil
+	}
+
+	ps := newProcessSupervisor("test-service", startFunc, 50*time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go ps.Run(ctx, nil, &wg)
+
+	// Wait until it has restarted at least 3 times
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if startCount.Load() >= 3 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if count := startCount.Load(); count < 3 {
+		t.Errorf("expected at least 3 starts due to auto-restart, got %d", count)
+	}
+
+	// Cancel and ensure supervisor stops cleanly
+	cancel()
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Stopped cleanly
+	case <-time.After(2 * time.Second):
+		t.Fatal("supervisor did not stop after context cancel")
+	}
+}
+
+func TestProcessSupervisorStop(t *testing.T) {
+	var startCount atomic.Int32
+
+	startFunc := func() (*exec.Cmd, error) {
+		startCount.Add(1)
+		cmd := exec.Command(os.Args[0], "-test.run=TestHelperProcess", "--")
+		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+		if err := cmd.Start(); err != nil {
+			return nil, err
+		}
+		return cmd, nil
+	}
+
+	ps := newProcessSupervisor("test-service-stop", startFunc, 50*time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go ps.Run(ctx, nil, &wg)
+
+	// Wait for at least 1 start
+	time.Sleep(100 * time.Millisecond)
+
+	// Stop supervisor explicitly
+	ps.Stop()
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Stopped cleanly
+	case <-time.After(2 * time.Second):
+		t.Fatal("supervisor did not stop after ps.Stop()")
+	}
+
+	countBefore := startCount.Load()
+	time.Sleep(150 * time.Millisecond)
+	countAfter := startCount.Load()
+
+	if countAfter != countBefore {
+		t.Errorf("supervisor continued starting processes after Stop(): %d -> %d", countBefore, countAfter)
+	}
+}
+
