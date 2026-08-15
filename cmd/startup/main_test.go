@@ -320,3 +320,52 @@ func TestProcessSupervisorStop(t *testing.T) {
 	}
 }
 
+func TestOrderlyShutdown(t *testing.T) {
+	var events []string
+	var mu sync.Mutex
+
+	recordEvent := func(name string) {
+		mu.Lock()
+		defer mu.Unlock()
+		events = append(events, name)
+	}
+
+	gameSuper := newProcessSupervisor("game", func() (*exec.Cmd, error) {
+		cmd := exec.Command(os.Args[0], "-test.run=TestHelperProcess", "--")
+		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+		return cmd, cmd.Start()
+	}, 100*time.Millisecond)
+
+	dbSuper := newProcessSupervisor("db", func() (*exec.Cmd, error) {
+		cmd := exec.Command(os.Args[0], "-test.run=TestHelperProcess", "--")
+		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+		return cmd, cmd.Start()
+	}, 100*time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go gameSuper.Run(ctx, nil, nil)
+	go dbSuper.Run(ctx, nil, nil)
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Shutdown sequence:
+	cancel()
+
+	// 1. Stop game server first
+	gameSuper.StopAndWait(1 * time.Second)
+	recordEvent("game_stopped")
+
+	// 2. Stop db server last
+	dbSuper.StopAndWait(1 * time.Second)
+	recordEvent("db_stopped")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) != 2 || events[0] != "game_stopped" || events[1] != "db_stopped" {
+		t.Errorf("unexpected shutdown order: %v", events)
+	}
+}
+
+

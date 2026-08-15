@@ -56,6 +56,7 @@ type ProcessSupervisor struct {
 	mu         sync.Mutex
 	currentCmd *exec.Cmd
 	stopped    bool
+	doneChan   chan struct{}
 }
 
 func newProcessSupervisor(name string, startFunc func() (*exec.Cmd, error), restartDelay time.Duration) *ProcessSupervisor {
@@ -63,6 +64,7 @@ func newProcessSupervisor(name string, startFunc func() (*exec.Cmd, error), rest
 		name:         name,
 		startFunc:    startFunc,
 		restartDelay: restartDelay,
+		doneChan:     make(chan struct{}),
 	}
 }
 
@@ -78,7 +80,13 @@ func (ps *ProcessSupervisor) GetCurrentCmd() *exec.Cmd {
 	return ps.currentCmd
 }
 
-func (ps *ProcessSupervisor) Stop() {
+func (ps *ProcessSupervisor) MarkStopped() {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.stopped = true
+}
+
+func (ps *ProcessSupervisor) Kill() {
 	ps.mu.Lock()
 	ps.stopped = true
 	cmd := ps.currentCmd
@@ -90,8 +98,28 @@ func (ps *ProcessSupervisor) Stop() {
 	}
 }
 
+func (ps *ProcessSupervisor) Stop() {
+	ps.Kill()
+}
+
+func (ps *ProcessSupervisor) StopAndWait(gracePeriod time.Duration) {
+	ps.MarkStopped()
+
+	select {
+	case <-ps.doneChan:
+		return
+	case <-time.After(gracePeriod):
+		fmt.Printf("%s did not stop within %v, killing process...\n", ps.name, gracePeriod)
+		ps.Kill()
+		<-ps.doneChan
+	}
+}
+
 func (ps *ProcessSupervisor) Run(ctx context.Context, initialCmd *exec.Cmd, wg *sync.WaitGroup) {
-	defer wg.Done()
+	if wg != nil {
+		defer wg.Done()
+	}
+	defer close(ps.doneChan)
 
 	cmd := initialCmd
 	for {
@@ -723,33 +751,43 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	sig := <-sigChan
-	fmt.Printf("\nReceived signal (%v). Shutting down all servers...\n", sig)
+	fmt.Printf("\nReceived signal (%v). Shutting down authserver and worldserver first...\n", sig)
 	cancel()
 
-	worldSupervisor.Stop()
-	authSupervisor.Stop()
+	// 1. Mark supervisors stopped and wait for authserver and worldserver to stop completely
+	authSupervisor.MarkStopped()
+	worldSupervisor.MarkStopped()
 
-	mysqlSupervisor.mu.Lock()
-	mysqlSupervisor.stopped = true
-	currentMysqlCmd := mysqlSupervisor.currentCmd
-	mysqlSupervisor.mu.Unlock()
+	var gameWg sync.WaitGroup
+	gameWg.Add(2)
 
-	_ = shutdownMySQL(binaries, opts.port)
-
-	waitDone := make(chan struct{})
 	go func() {
-		wg.Wait()
-		close(waitDone)
+		defer gameWg.Done()
+		authSupervisor.StopAndWait(10 * time.Second)
 	}()
 
+	go func() {
+		defer gameWg.Done()
+		worldSupervisor.StopAndWait(10 * time.Second)
+	}()
+
+	gameWg.Wait()
+	fmt.Println("Authserver and worldserver stopped successfully.")
+
+	// 2. Last, shut down mysqld after authserver and worldserver are down
+	fmt.Println("Shutting down MySQL server...")
+	mysqlSupervisor.MarkStopped()
+	_ = shutdownMySQL(binaries, opts.port)
+
 	select {
-	case <-waitDone:
-		fmt.Println("All servers stopped cleanly.")
+	case <-mysqlSupervisor.doneChan:
+		fmt.Println("MySQL server stopped cleanly.")
 	case <-time.After(10 * time.Second):
-		fmt.Println("Shutdown timed out after 10s, terminating remaining processes...")
-		if currentMysqlCmd != nil && currentMysqlCmd.Process != nil {
-			_ = currentMysqlCmd.Process.Kill()
-		}
+		fmt.Println("MySQL did not stop within 10s, terminating process...")
+		mysqlSupervisor.Kill()
+		<-mysqlSupervisor.doneChan
 	}
+
+	fmt.Println("All servers stopped cleanly.")
 }
 
