@@ -56,7 +56,7 @@ begin
     if WizardIsTaskSelected('downloaddata') then
     begin
       ZipPath := ExpandConstant('{tmp}\Data.zip');
-      DestDir := ExpandConstant('{app}\data');
+      DestDir := ExpandConstant('{localappdata}\Playerbots\data');
 
       // 1. Download Data.zip
       DownloadPage.Clear;
