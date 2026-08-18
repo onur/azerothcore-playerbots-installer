@@ -1272,7 +1272,8 @@ func ensureConfigFiles(baseDir, workDir string, mysqlExePath string, mysqlDir ..
 		fmt.Fprintf(os.Stderr, "Warning: failed to ensure MySQL config file: %v\n", err)
 	}
 
-	// 2. Ensure server configs from .conf.dist in configs/
+	// 2. Ensure server configs and logs directory in workDir
+	_ = os.MkdirAll(filepath.Join(workDir, "logs"), 0755)
 	configSrcDir := filepath.Join(baseDir, "configs")
 	if !dirExists(configSrcDir) {
 		return nil

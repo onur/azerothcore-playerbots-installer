@@ -516,6 +516,27 @@ func TestGetWorkDir(t *testing.T) {
 	}
 }
 
+func TestGetWorkDirLocalAppData(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("PLAYERBOTS_WORKDIR", "")
+	t.Setenv("LOCALAPPDATA", tmpDir)
+
+	workDir := getWorkDir()
+	expectedDir := filepath.Join(tmpDir, "Playerbots")
+	if workDir != expectedDir {
+		t.Errorf("getWorkDir() = %s, want %s", workDir, expectedDir)
+	}
+
+	// Verify logs and other subdirectories exist in LocalAppData/Playerbots
+	subdirs := []string{"configs", "logs", "data", "mysql", "mysql/data"}
+	for _, sub := range subdirs {
+		path := filepath.Join(expectedDir, sub)
+		if !dirExists(path) {
+			t.Errorf("expected directory to be created: %s", path)
+		}
+	}
+}
+
 func TestCalculateMySQLBufferPoolSettings(t *testing.T) {
 	poolSize, instances, _ := calculateMySQLBufferPoolSettings()
 	if poolSize == "" {
