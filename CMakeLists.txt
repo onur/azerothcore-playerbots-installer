@@ -59,8 +59,22 @@ if(CMAKE_INSTALL_PREFIX)
     set(CMAKE_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX_CLEAN}" CACHE PATH "Install directory prefix" FORCE)
 endif()
 
+if(NOT DEFINED PACKAGE_VERSION)
+    if(DEFINED ENV{PACKAGE_VERSION})
+        set(PACKAGE_VERSION "$ENV{PACKAGE_VERSION}")
+    elseif(DEFINED ENV{APP_VER})
+        set(PACKAGE_VERSION "$ENV{APP_VER}")
+    else()
+        set(PACKAGE_VERSION "0.1.0")
+    endif()
+endif()
+set(PACKAGE_VERSION "${PACKAGE_VERSION}" CACHE STRING "Package version for installer and archives")
+set(PACKAGE_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/output" CACHE PATH "Directory for built packages and installers")
+
 message(STATUS "=== Playerbots Workspace Build Configuration ===")
+message(STATUS "  Version        : ${PACKAGE_VERSION}")
 message(STATUS "  Install Prefix : ${CMAKE_INSTALL_PREFIX_CLEAN}")
+message(STATUS "  Output Dir     : ${PACKAGE_OUTPUT_DIR}")
 message(STATUS "  MySQL Root     : ${MYSQL_ROOT_DIR}")
 message(STATUS "  Boost Root     : ${BOOST_ROOT_DIR}")
 message(STATUS "  OpenSSL Root   : ${OPENSSL_ROOT_DIR}")
@@ -192,8 +206,17 @@ if(WIN32)
         )
     endif()
 
-    # 6. MSIX Packaging Target (Windows)
-    file(GLOB WIN_SDK_DIRS "C:/Program Files (x86)/Windows Kits/10/bin/*/x64" "C:/Program Files/Windows Kits/10/bin/*/x64")
+    # 6. Microsoft Store MSIXUpload Packaging Target (Windows)
+    file(GLOB WIN_SDK_DIRS
+        "$ENV{WindowsSdkDir}/bin/*/x64"
+        "$ENV{WindowsSdkVerBinPath}/x64"
+        "$ENV{WindowsSdkBinPath}"
+        "C:/Program Files (x86)/Windows Kits/10/bin/*/x64"
+        "C:/Program Files/Windows Kits/10/bin/*/x64"
+        "C:/Program Files (x86)/Windows Kits/10/App Certification Kit"
+        "C:/Program Files/Windows Kits/10/App Certification Kit"
+    )
+
     find_program(MAKEAPPX_EXECUTABLE makeappx
         HINTS ${WIN_SDK_DIRS}
         PATHS "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64"
@@ -203,36 +226,103 @@ if(WIN32)
     )
 
     if(MAKEAPPX_EXECUTABLE)
-        message(STATUS "  MakeAppx       : ${MAKEAPPX_EXECUTABLE}")
+        message(STATUS "  MSIX Packaging : ENABLED (Store MSIXUpload)")
+        message(STATUS "    MakeAppx     : ${MAKEAPPX_EXECUTABLE}")
 
-        set(MSIX_LAYOUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/msix-layout")
-        set(MSIX_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/output")
-        set(MSIX_OUTPUT_FILE "${MSIX_OUTPUT_DIR}/playerbots.msix")
+        set(MSIX_LAYOUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/msix-layout" CACHE PATH "Directory for MSIX packaging layout")
+        set(MSIX_STAGING_DIR "${CMAKE_CURRENT_BINARY_DIR}/msixupload-staging" CACHE PATH "Directory for MSIXUpload staging")
+        set(MSIX_PACKAGE_NAME "playerbots" CACHE STRING "Base name for MSIX packages")
+        set(MSIX_OUTPUT_FILE "${PACKAGE_OUTPUT_DIR}/${MSIX_PACKAGE_NAME}.msixupload")
 
-        set(MSIX_COMMANDS
+        set(MSIXUPLOAD_COMMANDS
             COMMAND ${CMAKE_COMMAND} -E make_directory "${MSIX_LAYOUT_DIR}"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${MSIX_OUTPUT_DIR}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${MSIX_STAGING_DIR}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKAGE_OUTPUT_DIR}"
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_INSTALL_PREFIX_CLEAN}" "${MSIX_LAYOUT_DIR}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/AppxManifest.xml" "${MSIX_LAYOUT_DIR}/AppxManifest.xml"
         )
 
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets")
-            list(APPEND MSIX_COMMANDS
+            list(APPEND MSIXUPLOAD_COMMANDS
                 COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/assets" "${MSIX_LAYOUT_DIR}/assets"
             )
         endif()
 
-        list(APPEND MSIX_COMMANDS
-            COMMAND "${MAKEAPPX_EXECUTABLE}" pack /v /d "${MSIX_LAYOUT_DIR}" /p "${MSIX_OUTPUT_FILE}" /o
+        # Step 1: Pack unsigned MSIX into staging directory (Microsoft Store signs it upon upload)
+        list(APPEND MSIXUPLOAD_COMMANDS
+            COMMAND "${MAKEAPPX_EXECUTABLE}" pack /v /d "${MSIX_LAYOUT_DIR}" /p "${MSIX_STAGING_DIR}/${MSIX_PACKAGE_NAME}.msix" /o
         )
 
-        add_custom_target(package_msix
-            ${MSIX_COMMANDS}
+        # Step 2: Create .msixupload container (ZIP archive containing the .msix) for Partner Center submission
+        list(APPEND MSIXUPLOAD_COMMANDS
+            COMMAND ${CMAKE_COMMAND} -E chdir "${MSIX_STAGING_DIR}" ${CMAKE_COMMAND} -E tar cf "${MSIX_OUTPUT_FILE}" --format=zip "${MSIX_PACKAGE_NAME}.msix"
+        )
+
+        # MSIXUpload Packaging Target
+        add_custom_target(package_msixupload
+            ${MSIXUPLOAD_COMMANDS}
             DEPENDS azerothcore
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-            COMMENT "Assembling and packaging MSIX: ${MSIX_OUTPUT_FILE}"
+            COMMENT "Building and packaging Microsoft Store upload bundle: ${MSIX_OUTPUT_FILE}"
+        )
+    else()
+        add_custom_target(package_msixupload
+            COMMAND ${CMAKE_COMMAND} -E echo "Error: makeappx.exe not found. Please install the Windows 10/11 SDK to build the MSIX package."
+            COMMAND ${CMAKE_COMMAND} -E false
+            COMMENT "MSIXUpload packaging unavailable (makeappx.exe not found)"
         )
     endif()
+
+    # 7. Inno Setup Windows Installer Target
+    find_program(INNO_SETUP_COMPILER iscc
+        PATHS "C:/Program Files/Inno Setup 7"
+              "C:/Program Files (x86)/Inno Setup 7"
+              "C:/Program Files (x86)/Inno Setup 6"
+              "C:/Program Files/Inno Setup 6"
+              "C:/Program Files (x86)/Inno Setup 5"
+              "C:/Program Files/Inno Setup 5"
+              "$ENV{LOCALAPPDATA}/Programs/Inno Setup 7"
+              "$ENV{LOCALAPPDATA}/Programs/Inno Setup 6"
+        DOC "Path to Inno Setup Compiler (ISCC.exe)"
+    )
+
+    if(INNO_SETUP_COMPILER)
+        message(STATUS "  Inno Setup     : ${INNO_SETUP_COMPILER}")
+
+        add_custom_target(package_installer
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKAGE_OUTPUT_DIR}"
+            COMMAND "${INNO_SETUP_COMPILER}" "/DAppVer=${PACKAGE_VERSION}" "/O${PACKAGE_OUTPUT_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/installer.iss"
+            DEPENDS azerothcore
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            COMMENT "Compiling Inno Setup Windows Installer: ${PACKAGE_OUTPUT_DIR}/playerbots-setup-${PACKAGE_VERSION}.exe"
+        )
+        add_custom_target(package_innosetup
+            DEPENDS package_installer
+            COMMENT "Alias for package_installer target"
+        )
+    else()
+        add_custom_target(package_installer
+            COMMAND ${CMAKE_COMMAND} -E echo "Error: ISCC.exe (Inno Setup) not found. Please install Inno Setup 6 or 7."
+            COMMAND ${CMAKE_COMMAND} -E false
+            COMMENT "Inno Setup packaging unavailable (ISCC.exe not found)"
+        )
+        add_custom_target(package_innosetup DEPENDS package_installer)
+    endif()
+
+    # 8. Portable ZIP Packaging Target
+    set(PORTABLE_ZIP_FILE "${PACKAGE_OUTPUT_DIR}/playerbots-setup-${PACKAGE_VERSION}.zip")
+
+    add_custom_target(package_zip
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKAGE_OUTPUT_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_INSTALL_PREFIX_CLEAN}" ${CMAKE_COMMAND} -E tar cf "${PORTABLE_ZIP_FILE}" --format=zip .
+        DEPENDS azerothcore
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        COMMENT "Creating portable zip package: ${PORTABLE_ZIP_FILE}"
+    )
+    add_custom_target(package_portable
+        DEPENDS package_zip
+        COMMENT "Alias for package_zip target"
+    )
 else()
     if(GO_EXECUTABLE)
         ExternalProject_Add_Step(azerothcore build_startup_tool

@@ -111,11 +111,25 @@ Configuration files are located in the `configs/` directory:
    cmake --build build --config RelWithDebInfo --target install
    ```
 
-4. **Build the Inno Setup Installer**:
-   ```powershell
-   & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
-   ```
-   The compiled installer will be generated in `output/playerbots-setup-0.1.0.exe`.
+4. **Packaging Targets (Optional)**:
+
+   - **Build Inno Setup Installer (`.exe`)**:
+     ```powershell
+     cmake --build build --config RelWithDebInfo --target package_installer
+     ```
+     Generates `output/playerbots-setup-<version>.exe`.
+
+   - **Build Portable ZIP Archive (`.zip`)**:
+     ```powershell
+     cmake --build build --config RelWithDebInfo --target package_zip
+     ```
+     Generates `output/playerbots-setup-<version>.zip`.
+
+   - **Build Microsoft Store Bundle (`.msixupload`)**:
+     ```powershell
+     cmake --build build --config RelWithDebInfo --target package_msixupload
+     ```
+     Generates `output/playerbots.msixupload` ready for submission to Microsoft Partner Center.
 
 ---
 
