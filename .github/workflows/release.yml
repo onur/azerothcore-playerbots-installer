@@ -68,10 +68,7 @@ jobs:
           if (-not (Test-Path 'C:\tools\mysql\current\bin\mysqld.exe')) {
               Write-Host "Downloading MySQL Server 8.0..."
               $mysqlZip = Join-Path $env:RUNNER_TEMP 'mysql-8.0-winx64.zip'
-              curl.exe -sSL --retry 3 -A "Mozilla/5.0" "https://cdn.mysql.com/archives/mysql-8.0/mysql-8.0.40-winx64.zip" -o $mysqlZip
-              $mysqlMB = (Get-Item $mysqlZip).Length / 1MB
-              Write-Host ("Downloaded MySQL zip: {0:N1} MB" -f $mysqlMB)
-              if ($mysqlMB -lt 50) { throw "MySQL zip download failed." }
+              curl.exe --fail -sSL --retry 3 -A "Mozilla/5.0" "https://cdn.mysql.com/archives/mysql-8.0/mysql-8.0.40-winx64.zip" -o $mysqlZip
               New-Item -ItemType Directory -Force -Path 'C:\tools\mysql' | Out-Null
               Expand-Archive -Path $mysqlZip -DestinationPath 'C:\tools\mysql' -Force
               if (Test-Path 'C:\tools\mysql\current') { Remove-Item -Recurse -Force 'C:\tools\mysql\current' }
@@ -84,10 +81,7 @@ jobs:
           if (-not (Test-Path 'C:\tools\openssl\current\x64\include\openssl\opensslv.h')) {
               Write-Host "Downloading FireDaemon OpenSSL 3.5.7..."
               $opensslZip = Join-Path $env:RUNNER_TEMP 'openssl-3.5.7.zip'
-              curl.exe -sSL --retry 3 -A "Mozilla/5.0" "https://download.firedaemon.com/FireDaemon-OpenSSL/openssl-3.5.7.zip" -o $opensslZip
-              $opensslMB = (Get-Item $opensslZip).Length / 1MB
-              Write-Host ("Downloaded OpenSSL zip: {0:N1} MB" -f $opensslMB)
-              if ($opensslMB -lt 10) { throw "OpenSSL zip download failed." }
+              curl.exe --fail -sSL --retry 3 -A "Mozilla/5.0" "https://download.firedaemon.com/FireDaemon-OpenSSL/openssl-3.5.7.zip" -o $opensslZip
               New-Item -ItemType Directory -Force -Path 'C:\tools\openssl\current' | Out-Null
               Expand-Archive -Path $opensslZip -DestinationPath 'C:\tools\openssl\current' -Force
           }
