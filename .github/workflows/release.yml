@@ -121,16 +121,6 @@ jobs:
         run: |
           cmake --build build --config RelWithDebInfo --target package_zip
 
-      - name: Generate SHA-256 Checksums
-        shell: pwsh
-        working-directory: output
-        run: |
-          Get-ChildItem -File | ForEach-Object {
-              $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower()
-              "$hash  $($_.Name)" | Out-File -FilePath "$($_.Name).sha256" -Encoding ascii
-          }
-          Get-ChildItem
-
       - name: Generate Release Notes
         shell: pwsh
         run: |
@@ -145,25 +135,34 @@ jobs:
 
           $packageEmoji = [char]::ConvertFromUtf32(0x1F4E6)
           $rocketEmoji  = [char]::ConvertFromUtf32(0x1F680)
+          $lockEmoji    = [char]::ConvertFromUtf32(0x1F512)
           $bt           = '`'
           $bt3          = '```'
 
-          $lines = @(
-              "Turnkey Windows distribution for AzerothCore WotLK (3.3.5a) and mod-playerbots with an automated installer and startup orchestrator.",
-              "### $packageEmoji Upstream Versions",
-              "- **azerothcore-wotlk**: [$bt$acoreShort$bt](https://github.com/mod-playerbots/azerothcore-wotlk/commit/$acoreSha) (${bt}Playerbot${bt} branch, $acoreDate)",
-              "- **mod-playerbots**: [$bt$modShort$bt](https://github.com/mod-playerbots/mod-playerbots/commit/$modSha) (${bt}master${bt} branch, $modDate)",
-              "",
-              "### $rocketEmoji Quick Start",
-              "1. Download and run **${bt}playerbots-setup-$ver.exe${bt}** from the Assets below.",
-              '2. Check **"Download client data (maps, vmaps, mmaps, dbc)"** during installation.',
-              "3. Launch **Playerbots Server Launcher** from your Desktop or Start Menu.",
-              "4. Set realmlist to ${bt}set realmlist 127.0.0.1${bt} and create an account via the server console:",
-              "   ${bt3}text",
-              "   account create <username> <password>",
-              "   account set gmlevel <username> 3 -1",
-              "   ${bt3}"
-          )
+          $lines = [System.Collections.Generic.List[string]]::new()
+          $lines.Add("Turnkey Windows distribution for AzerothCore WotLK (3.3.5a) and mod-playerbots with an automated installer and startup orchestrator.")
+          $lines.Add("")
+          $lines.Add("### $packageEmoji Upstream Versions")
+          $lines.Add("- **azerothcore-wotlk**: [$bt$acoreShort$bt](https://github.com/mod-playerbots/azerothcore-wotlk/commit/$acoreSha) (${bt}Playerbot${bt} branch, $acoreDate)")
+          $lines.Add("- **mod-playerbots**: [$bt$modShort$bt](https://github.com/mod-playerbots/mod-playerbots/commit/$modSha) (${bt}master${bt} branch, $modDate)")
+          $lines.Add("")
+          $lines.Add("### $rocketEmoji Quick Start")
+          $lines.Add("1. Download and run **${bt}playerbots-setup-$ver.exe${bt}** from the Assets below.")
+          $lines.Add('2. Check **"Download client data (maps, vmaps, mmaps, dbc)"** during installation.')
+          $lines.Add("3. Launch **Playerbots Server Launcher** from your Desktop or Start Menu.")
+          $lines.Add("4. Set realmlist to ${bt}set realmlist 127.0.0.1${bt} and create an account via the server console:")
+          $lines.Add("   ${bt3}text")
+          $lines.Add("   account create <username> <password>")
+          $lines.Add("   account set gmlevel <username> 3 -1")
+          $lines.Add("   ${bt3}")
+          $lines.Add("")
+          $lines.Add("### $lockEmoji SHA-256 Checksums")
+          $lines.Add("| File | SHA-256 Checksum |")
+          $lines.Add("| :--- | :--- |")
+          Get-ChildItem -Path output -File | Where-Object { $_.Extension -in '.exe', '.zip' } | ForEach-Object {
+              $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower()
+              $lines.Add("| ${bt}$($_.Name)${bt} | ${bt}$hash${bt} |")
+          }
 
           $notes = $lines -join "`n"
           [System.IO.File]::WriteAllText("release_notes.md", $notes, [System.Text.UTF8Encoding]::new($false))
@@ -181,5 +180,4 @@ jobs:
           files: |
             output/*.exe
             output/*.zip
-            output/*.sha256
 
