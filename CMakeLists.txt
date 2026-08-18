@@ -120,12 +120,12 @@ ExternalProject_Add(azerothcore
 ExternalProject_Add_Step(azerothcore copy_sql_files
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/azerothcore-wotlk/data/sql"
-        "${CMAKE_INSTALL_PREFIX_CLEAN}/data/sql"
+        "${CMAKE_INSTALL_PREFIX_CLEAN}/src/data/sql"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/mod-playerbots/data/sql"
-        "${CMAKE_INSTALL_PREFIX_CLEAN}/modules/mod-playerbots/data/sql"
+        "${CMAKE_INSTALL_PREFIX_CLEAN}/src/modules/mod-playerbots/data/sql"
     DEPENDEES install
-    COMMENT "Copying SQL migration files to ${CMAKE_INSTALL_PREFIX_CLEAN}"
+    COMMENT "Copying SQL migration files to ${CMAKE_INSTALL_PREFIX_CLEAN}/src"
 )
 
 if(WIN32)

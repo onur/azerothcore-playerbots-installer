@@ -382,10 +382,11 @@ func TestEnsureConfigFiles(t *testing.T) {
 		t.Fatalf("failed to create config dirs: %v", err)
 	}
 
-	// 1. Create root level .conf.dist with SourceDirectory and MySQLExecutable
+	// 1. Create root level .conf.dist with SourceDirectory, MySQLExecutable, and DataDir
 	worldDistContent := `
 SourceDirectory = ""
 MySQLExecutable = ""
+DataDir = "."
 Rate.XP.Kill = 1
 `
 	if err := os.WriteFile(filepath.Join(configDir, "worldserver.conf.dist"), []byte(worldDistContent), 0644); err != nil {
@@ -425,11 +426,14 @@ MyCustomOption = 42
 		t.Fatalf("failed to read created worldserver.conf: %v", err)
 	}
 	worldConf := string(worldConfBytes)
-	if !strings.Contains(worldConf, `SourceDirectory = "."`) {
-		t.Errorf("worldserver.conf missing SourceDirectory = \".\": %s", worldConf)
+	if !strings.Contains(worldConf, `SourceDirectory = "src"`) {
+		t.Errorf("worldserver.conf missing SourceDirectory = \"src\": %s", worldConf)
 	}
 	if !strings.Contains(worldConf, `MySQLExecutable = "mysql/bin/mysql.exe"`) {
 		t.Errorf("worldserver.conf missing MySQLExecutable = \"mysql/bin/mysql.exe\": %s", worldConf)
+	}
+	if !strings.Contains(worldConf, `DataDir = "data"`) {
+		t.Errorf("worldserver.conf missing DataDir = \"data\": %s", worldConf)
 	}
 	if !strings.Contains(worldConf, `Rate.XP.Kill = 1`) {
 		t.Errorf("worldserver.conf missing content: %s", worldConf)

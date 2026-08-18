@@ -861,7 +861,8 @@ func ensureConfigFiles(baseDir string, mysqlExePath string, mysqlDir ...string) 
 				}
 
 				content := string(data)
-				content = strings.Replace(content, `SourceDirectory = ""`, `SourceDirectory = "."`, 1)
+				content = strings.Replace(content, `DataDir = "."`, `DataDir = "data"`, 1)
+				content = strings.Replace(content, `SourceDirectory = ""`, `SourceDirectory = "src"`, 1)
 				content = strings.Replace(content, `MySQLExecutable = ""`, fmt.Sprintf(`MySQLExecutable = "%s"`, relMySQLExe), 1)
 
 				// Enable AiPlayerbot.DisabledWithoutRealPlayer by default to reduce disk writes when no real players are online
@@ -1085,4 +1086,3 @@ func main() {
 
 	fmt.Println("All servers stopped cleanly.")
 }
-

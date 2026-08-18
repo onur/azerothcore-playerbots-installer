@@ -46,7 +46,7 @@ begin
     if WizardIsTaskSelected('downloaddata') then
     begin
       ZipPath := ExpandConstant('{tmp}\Data.zip');
-      DestDir := ExpandConstant('{app}');
+      DestDir := ExpandConstant('{app}\data');
 
       // 1. Download Data.zip
       DownloadPage.Clear;
@@ -66,11 +66,12 @@ begin
         DownloadPage.Hide;
       end;
 
-      // 2. Extract Data.zip into {app}
+      // 2. Extract Data.zip into {app}\data
       if FileExists(ZipPath) then
       begin
         WizardForm.StatusLabel.Caption := 'Extracting client data (this may take a few minutes)...';
         WizardForm.ProgressGauge.Style := npbstMarquee;
+        ForceDirectories(DestDir);
 
         // Extract using Windows native tar.exe (fastest, built into Windows 10/11)
         if not Exec('tar.exe', Format('-xf "%s" -C "%s"', [ZipPath, DestDir]), '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
