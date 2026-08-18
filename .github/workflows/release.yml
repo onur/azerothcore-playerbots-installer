@@ -58,7 +58,7 @@ jobs:
           if (-not (Test-Path 'C:\local\boost_1_84_0\boost\version.hpp')) {
               Write-Host "Downloading Boost 1.84.0..."
               $boostExe = Join-Path $env:RUNNER_TEMP 'boost.exe'
-              Invoke-WebRequest -Uri 'https://master.dl.sourceforge.net/project/boost/boost-binaries/1.84.0/boost_1_84_0-msvc-14.3-64.exe?viasf=1' -OutFile $boostExe
+              Invoke-WebRequest -Uri 'https://master.dl.sourceforge.net/project/boost/boost-binaries/1.84.0/boost_1_84_0-msvc-14.3-64.exe?viasf=1' -OutFile $boostExe -UserAgent 'Mozilla/5.0' -AllowInsecureRedirect
               $boostMB = (Get-Item $boostExe).Length / 1MB
               Write-Host ("Downloaded Boost installer: {0:N1} MB" -f $boostMB)
               if ($boostMB -lt 50) { throw "Boost installer download failed." }
