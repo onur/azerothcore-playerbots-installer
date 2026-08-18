@@ -288,10 +288,7 @@ func parseArgs(args []string) (startupOptions, error) {
 }
 
 func findExecutable(dir, name string) string {
-	exts := []string{""}
-	if runtime.GOOS == "windows" {
-		exts = []string{".exe", ".bat", ".cmd", ""}
-	}
+	exts := []string{".exe", ".bat", ".cmd", ""}
 
 	if dir != "" {
 		for _, ext := range exts {
@@ -587,18 +584,18 @@ func shutdownMySQLAndWait(binaries *mysqlBinaries, port int, cmd *exec.Cmd) erro
 func findBaseDir() string {
 	if exePath, err := os.Executable(); err == nil {
 		exeDir := filepath.Dir(exePath)
-		if fileExists(filepath.Join(exeDir, "authserver.exe")) || fileExists(filepath.Join(exeDir, "authserver")) {
+		if fileExists(filepath.Join(exeDir, "authserver.exe")) {
 			return exeDir
 		}
 	}
 
-	if fileExists("authserver.exe") || fileExists("authserver") {
+	if fileExists("authserver.exe") {
 		if abs, err := filepath.Abs("."); err == nil {
 			return abs
 		}
 	}
 
-	if fileExists(filepath.Join("dist", "authserver.exe")) || fileExists(filepath.Join("dist", "authserver")) {
+	if fileExists(filepath.Join("dist", "authserver.exe")) {
 		if abs, err := filepath.Abs("dist"); err == nil {
 			return abs
 		}
@@ -618,8 +615,6 @@ func ensureConfigFiles(baseDir string, mysqlExePath string) error {
 		if rel, err := filepath.Rel(baseDir, mysqlExePath); err == nil {
 			relMySQLExe = filepath.ToSlash(rel)
 		}
-	} else if runtime.GOOS != "windows" {
-		relMySQLExe = "mysql/bin/mysql"
 	}
 
 	return filepath.Walk(configDir, func(path string, info os.FileInfo, err error) error {
@@ -664,6 +659,11 @@ func ensureConfigFiles(baseDir string, mysqlExePath string) error {
 }
 
 func main() {
+	if runtime.GOOS != "windows" {
+		fmt.Fprintf(os.Stderr, "Error: mod-playerbots startup tool is only supported on Windows (detected OS: %s)\n", runtime.GOOS)
+		os.Exit(1)
+	}
+
 	opts, err := parseArgs(os.Args[1:])
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
