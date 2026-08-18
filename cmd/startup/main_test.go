@@ -497,31 +497,62 @@ MyCustomOption = 42
 	}
 }
 
-func TestGetWorkDir(t *testing.T) {
+func TestGetWorkDirEnvOverride(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("PLAYERBOTS_WORKDIR", tmpDir)
+	envDir := filepath.Join(tmpDir, "custom_work")
+	t.Setenv("PLAYERBOTS_WORKDIR", envDir)
 
-	workDir := getWorkDir()
-	if workDir != tmpDir {
-		t.Errorf("getWorkDir() = %s, want %s", workDir, tmpDir)
+	baseDir := filepath.Join(tmpDir, "base")
+	_ = os.MkdirAll(baseDir, 0755)
+
+	workDir := getWorkDir(baseDir)
+	if workDir != envDir {
+		t.Errorf("getWorkDir() = %s, want %s", workDir, envDir)
 	}
 
 	// Verify required subdirectories are created
 	subdirs := []string{"configs", "logs", "data", "mysql", "mysql/data"}
 	for _, sub := range subdirs {
-		path := filepath.Join(tmpDir, sub)
+		path := filepath.Join(envDir, sub)
 		if !dirExists(path) {
 			t.Errorf("expected directory to be created: %s", path)
 		}
 	}
 }
 
-func TestGetWorkDirLocalAppData(t *testing.T) {
+func TestGetWorkDirPortable(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("PLAYERBOTS_WORKDIR", "")
+
+	baseDir := filepath.Join(tmpDir, "portable_app")
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		t.Fatalf("failed to create baseDir: %v", err)
+	}
+
+	workDir := getWorkDir(baseDir)
+	if workDir != baseDir {
+		t.Errorf("getWorkDir() = %s, want %s for writable portable baseDir", workDir, baseDir)
+	}
+
+	// Verify subdirectories exist in baseDir
+	subdirs := []string{"configs", "logs", "data", "mysql", "mysql/data"}
+	for _, sub := range subdirs {
+		path := filepath.Join(baseDir, sub)
+		if !dirExists(path) {
+			t.Errorf("expected directory to be created: %s", path)
+		}
+	}
+}
+
+func TestGetWorkDirLocalAppDataFallback(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("PLAYERBOTS_WORKDIR", "")
 	t.Setenv("LOCALAPPDATA", tmpDir)
 
-	workDir := getWorkDir()
+	// Non-existent base directory simulates non-writable location
+	nonWritableBaseDir := filepath.Join(tmpDir, "non_existent_or_readonly_base", "nested")
+
+	workDir := getWorkDir(nonWritableBaseDir)
 	expectedDir := filepath.Join(tmpDir, "Playerbots")
 	if workDir != expectedDir {
 		t.Errorf("getWorkDir() = %s, want %s", workDir, expectedDir)
@@ -534,6 +565,18 @@ func TestGetWorkDirLocalAppData(t *testing.T) {
 		if !dirExists(path) {
 			t.Errorf("expected directory to be created: %s", path)
 		}
+	}
+}
+
+func TestIsDirWritable(t *testing.T) {
+	tmpDir := t.TempDir()
+	if !isDirWritable(tmpDir) {
+		t.Errorf("expected isDirWritable(%s) = true", tmpDir)
+	}
+
+	nonExistent := filepath.Join(tmpDir, "does_not_exist")
+	if isDirWritable(nonExistent) {
+		t.Errorf("expected isDirWritable(%s) = false", nonExistent)
 	}
 }
 

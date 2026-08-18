@@ -1152,15 +1152,60 @@ default-character-set = utf8mb4
 `, ramComment, poolSize, poolInstances, redoLogCapacity)
 }
 
-func getWorkDir() string {
+var (
+	kernel32                      = syscall.NewLazyDLL("kernel32.dll")
+	procGetCurrentPackageFullName = kernel32.NewProc("GetCurrentPackageFullName")
+)
+
+const appModelErrorNoPackage = 15700
+
+// isPackagedApp returns true if the process is running inside an MSIX/AppX package.
+func isPackagedApp() bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	if err := procGetCurrentPackageFullName.Find(); err != nil {
+		return false
+	}
+	var length uint32
+	r1, _, _ := procGetCurrentPackageFullName.Call(
+		uintptr(unsafe.Pointer(&length)),
+		uintptr(0),
+	)
+	return r1 != uintptr(appModelErrorNoPackage)
+}
+
+// isDirWritable checks whether a directory exists and files can be created in it.
+func isDirWritable(dir string) bool {
+	if !dirExists(dir) {
+		return false
+	}
+	testFile := filepath.Join(dir, fmt.Sprintf(".write_test_%d", time.Now().UnixNano()))
+	if err := os.WriteFile(testFile, []byte("ok"), 0644); err != nil {
+		return false
+	}
+	_ = os.Remove(testFile)
+	return true
+}
+
+func ensureWorkDirStructure(dir string) {
+	_ = os.MkdirAll(dir, 0755)
+	_ = os.MkdirAll(filepath.Join(dir, "configs"), 0755)
+	_ = os.MkdirAll(filepath.Join(dir, "logs"), 0755)
+	_ = os.MkdirAll(filepath.Join(dir, "data"), 0755)
+	_ = os.MkdirAll(filepath.Join(dir, "mysql"), 0755)
+	_ = os.MkdirAll(filepath.Join(dir, "mysql", "data"), 0755)
+}
+
+func getWorkDir(baseDir string) string {
 	if envDir := os.Getenv("PLAYERBOTS_WORKDIR"); envDir != "" {
-		_ = os.MkdirAll(envDir, 0755)
-		_ = os.MkdirAll(filepath.Join(envDir, "configs"), 0755)
-		_ = os.MkdirAll(filepath.Join(envDir, "logs"), 0755)
-		_ = os.MkdirAll(filepath.Join(envDir, "data"), 0755)
-		_ = os.MkdirAll(filepath.Join(envDir, "mysql"), 0755)
-		_ = os.MkdirAll(filepath.Join(envDir, "mysql", "data"), 0755)
+		ensureWorkDirStructure(envDir)
 		return envDir
+	}
+
+	if !isPackagedApp() && isDirWritable(baseDir) {
+		ensureWorkDirStructure(baseDir)
+		return baseDir
 	}
 
 	localAppData := os.Getenv("LOCALAPPDATA")
@@ -1175,12 +1220,7 @@ func getWorkDir() string {
 	}
 
 	appDir := filepath.Join(localAppData, "Playerbots")
-	_ = os.MkdirAll(appDir, 0755)
-	_ = os.MkdirAll(filepath.Join(appDir, "configs"), 0755)
-	_ = os.MkdirAll(filepath.Join(appDir, "logs"), 0755)
-	_ = os.MkdirAll(filepath.Join(appDir, "data"), 0755)
-	_ = os.MkdirAll(filepath.Join(appDir, "mysql"), 0755)
-	_ = os.MkdirAll(filepath.Join(appDir, "mysql", "data"), 0755)
+	ensureWorkDirStructure(appDir)
 	return appDir
 }
 
@@ -1379,8 +1419,12 @@ func main() {
 	}
 
 	baseDir := findBaseDir()
-	workDir := getWorkDir()
-	fmt.Printf("Working directory: %s\n", workDir)
+	workDir := getWorkDir(baseDir)
+	if workDir != baseDir {
+		fmt.Printf("Running in packaged mode. Working directory: %s\n", workDir)
+	} else {
+		fmt.Printf("Working directory: %s\n", workDir)
+	}
 
 	// Set up early root context and signal handling so Ctrl+C at any time shuts down child processes
 	rootCtx, rootCancel := context.WithCancel(context.Background())
