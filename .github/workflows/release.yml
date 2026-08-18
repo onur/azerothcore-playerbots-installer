@@ -1,0 +1,192 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 0.1.0)'
+        required: false
+        default: '0.1.0'
+      prerelease:
+        description: 'Publish as pre-release'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build Windows Installer & Release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository and submodules
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress
+
+      - name: Cache Build Dependencies (Boost, MySQL, OpenSSL)
+        uses: actions/cache@v6
+        with:
+          path: |
+            C:\local\boost_1_84_0
+            C:\tools\mysql\current
+            C:\tools\openssl\current
+          key: win-deps-boost-1.84.0-mysql-8.0.46-openssl-3.5.7
+
+      - name: Setup Dependencies (Boost, MySQL, OpenSSL)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # 1. Boost 1.84.0 (msvc-14.3, 64-bit)
+          if (-not (Test-Path 'C:\local\boost_1_84_0\boost\version.hpp')) {
+              Write-Host "Downloading Boost 1.84.0..."
+              $boostExe = Join-Path $env:RUNNER_TEMP 'boost.exe'
+              Invoke-WebRequest -Uri 'https://master.dl.sourceforge.net/project/boost/boost-binaries/1.84.0/boost_1_84_0-msvc-14.3-64.exe?viasf=1' -OutFile $boostExe
+              $boostMB = (Get-Item $boostExe).Length / 1MB
+              Write-Host ("Downloaded Boost installer: {0:N1} MB" -f $boostMB)
+              if ($boostMB -lt 50) { throw "Boost installer download failed." }
+              $boostProc = Start-Process -FilePath $boostExe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/DIR=C:\local\boost_1_84_0' -Wait -PassThru
+              if ($boostProc.ExitCode -ne 0) { throw "Boost installer failed with exit code $($boostProc.ExitCode)." }
+          }
+          "BOOST_ROOT=C:\local\boost_1_84_0" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          # 2. MySQL Community Server 8.0.46 (64-bit)
+          if (-not (Test-Path 'C:\tools\mysql\current\bin\mysqld.exe')) {
+              Write-Host "Downloading MySQL Server 8.0.46..."
+              $mysqlZip = Join-Path $env:RUNNER_TEMP 'mysql-8.0.46-winx64.zip'
+              $downloadUrls = @(
+                  'https://cdn.mysql.com/archives/mysql-8.0/mysql-8.0.46-winx64.zip',
+                  'https://dev.mysql.com/get/Downloads/MySQL-8.0/mysql-8.0.46-winx64.zip'
+              )
+              $downloadSuccess = $false
+              foreach ($url in $downloadUrls) {
+                  try {
+                      Write-Host "Attempting download from $url..."
+                      Invoke-WebRequest -Uri $url -OutFile $mysqlZip -UserAgent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' -ErrorAction Stop
+                      if ((Get-Item $mysqlZip).Length -gt 50MB) {
+                          $downloadSuccess = $true
+                          break
+                      }
+                  } catch {
+                      Write-Host "Download from $url failed: $($_.Exception.Message)"
+                  }
+              }
+              if (-not $downloadSuccess) {
+                  Write-Host "Falling back to MySQL 8.0 archive CDN..."
+                  Invoke-WebRequest -Uri 'https://cdn.mysql.com/archives/mysql-8.0/mysql-8.0.40-winx64.zip' -OutFile $mysqlZip -UserAgent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' -ErrorAction Stop
+              }
+
+              $mysqlMB = (Get-Item $mysqlZip).Length / 1MB
+              Write-Host ("Downloaded MySQL zip: {0:N1} MB" -f $mysqlMB)
+              if ($mysqlMB -lt 50) { throw "MySQL zip download failed." }
+              New-Item -ItemType Directory -Force -Path 'C:\tools\mysql' | Out-Null
+              Expand-Archive -Path $mysqlZip -DestinationPath 'C:\tools\mysql' -Force
+              if (Test-Path 'C:\tools\mysql\current') { Remove-Item -Recurse -Force 'C:\tools\mysql\current' }
+              $extractedDir = Get-ChildItem -Path 'C:\tools\mysql' -Directory | Where-Object { $_.Name -like 'mysql-8.0*' } | Select-Object -First 1
+              Rename-Item $extractedDir.FullName 'C:\tools\mysql\current'
+          }
+          "MYSQL_ROOT_DIR=C:\tools\mysql\current" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          # 3. FireDaemon OpenSSL 3.5.7 (64-bit)
+          if (-not (Test-Path 'C:\tools\openssl\current\x64\include\openssl\opensslv.h')) {
+              Write-Host "Downloading FireDaemon OpenSSL 3.5.7..."
+              $opensslZip = Join-Path $env:RUNNER_TEMP 'openssl-3.5.7.zip'
+              Invoke-WebRequest -Uri 'https://download.firedaemon.com/FireDaemon-OpenSSL/openssl-3.5.7.zip' -OutFile $opensslZip -UserAgent 'Mozilla/5.0'
+              $opensslMB = (Get-Item $opensslZip).Length / 1MB
+              Write-Host ("Downloaded OpenSSL zip: {0:N1} MB" -f $opensslMB)
+              if ($opensslMB -lt 10) { throw "OpenSSL zip download failed." }
+              New-Item -ItemType Directory -Force -Path 'C:\tools\openssl\current' | Out-Null
+              Expand-Archive -Path $opensslZip -DestinationPath 'C:\tools\openssl\current' -Force
+          }
+          "OPENSSL_ROOT_DIR=C:\tools\openssl\current\x64" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Using OpenSSL at C:\tools\openssl\current\x64"
+
+      - name: Ensure mod-playerbots module path
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "azerothcore-wotlk/modules/mod-playerbots/src")) {
+              Write-Host "Syncing mod-playerbots into azerothcore-wotlk/modules/mod-playerbots..."
+              New-Item -ItemType Directory -Force -Path "azerothcore-wotlk/modules/mod-playerbots" | Out-Null
+              Copy-Item -Recurse -Force "mod-playerbots/*" "azerothcore-wotlk/modules/mod-playerbots/"
+          }
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          cmake -B build -S . `
+            -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+            -DMYSQL_ROOT_DIR="$env:MYSQL_ROOT_DIR" `
+            -DOPENSSL_ROOT_DIR="$env:OPENSSL_ROOT_DIR" `
+            -DBOOST_ROOT_DIR="$env:BOOST_ROOT"
+
+      - name: Build & Install
+        shell: pwsh
+        run: |
+          cmake --build build --config RelWithDebInfo --target install --parallel
+
+      - name: Determine Version
+        id: get_version
+        shell: pwsh
+        run: |
+          $ver = "dev"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.version }}") {
+              $ver = "${{ inputs.version }}".TrimStart('v')
+          } elseif ($env:GITHUB_REF -like "refs/tags/v*") {
+              $ver = $env:GITHUB_REF.Substring(11)
+          }
+          Write-Host "Release version: $ver"
+          "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Build Inno Setup Installer
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.get_version.outputs.version }}"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVer="$ver" installer.iss
+
+      - name: Create Portable Zip Package
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.get_version.outputs.version }}"
+          Compress-Archive -Path "dist\*" -DestinationPath "output\playerbots-portable-$ver.zip" -CompressionLevel Optimal
+
+      - name: Generate SHA-256 Checksums
+        shell: pwsh
+        working-directory: output
+        run: |
+          Get-ChildItem -File | ForEach-Object {
+              $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower()
+              "$hash  $($_.Name)" | Out-File -FilePath "$($_.Name).sha256" -Encoding ascii
+          }
+          Get-ChildItem
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', steps.get_version.outputs.version) }}
+          name: ${{ format('AzerothCore Playerbots v{0}', steps.get_version.outputs.version) }}
+          prerelease: ${{ inputs.prerelease || false }}
+          draft: false
+          generate_release_notes: true
+          files: |
+            output/*.exe
+            output/*.zip
+            output/*.sha256

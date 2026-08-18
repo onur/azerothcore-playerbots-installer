@@ -1,4 +1,6 @@
-#define AppVer "0.1.0"
+#ifndef AppVer
+  #define AppVer "dev"
+#endif
 
 [Setup]
 AppName=AzerothCore Playerbots Server
