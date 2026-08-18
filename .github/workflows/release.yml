@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-and-release:
-    name: Build Windows Installer & Release
+    name: Build and Release
     runs-on: windows-2022
 
     steps:
@@ -24,10 +24,6 @@ jobs:
         with:
           go-version: '1.26.6'
           cache: true
-
-      - name: Install Inno Setup
-        shell: pwsh
-        run: choco install innosetup --no-progress
 
       - name: Install Boost
         uses: MarkusJx/install-boost@v2
@@ -135,17 +131,16 @@ jobs:
           $bt3          = '```'
 
           $lines = [System.Collections.Generic.List[string]]::new()
-          $lines.Add("Turnkey Windows distribution for AzerothCore WotLK (3.3.5a) and mod-playerbots with an automated installer and startup orchestrator.")
+          $lines.Add("Turnkey Windows portable distribution for AzerothCore WotLK (3.3.5a) and mod-playerbots with an automated startup orchestrator and client data downloader.")
           $lines.Add("")
           $lines.Add("### $packageEmoji Upstream Versions")
           $lines.Add("- **azerothcore-wotlk**: [$bt$acoreShort$bt](https://github.com/mod-playerbots/azerothcore-wotlk/commit/$acoreSha) (${bt}Playerbot${bt} branch, $acoreDate)")
           $lines.Add("- **mod-playerbots**: [$bt$modShort$bt](https://github.com/mod-playerbots/mod-playerbots/commit/$modSha) (${bt}master${bt} branch, $modDate)")
           $lines.Add("")
           $lines.Add("### $rocketEmoji Quick Start")
-          $lines.Add("1. Download and run **${bt}playerbots-setup-$ver.exe${bt}** from the Assets below.")
-          $lines.Add('2. Check **"Download client data (maps, vmaps, mmaps, dbc)"** during installation.')
-          $lines.Add("3. Launch **Playerbots Server Launcher** from your Desktop or Start Menu.")
-          $lines.Add("4. Set realmlist to ${bt}set realmlist 127.0.0.1${bt} and create an account via the server console:")
+          $lines.Add("1. Download and extract **${bt}playerbots-portable-$ver.zip${bt}** from the Assets below.")
+          $lines.Add("2. Run **${bt}startup.exe${bt}** (on first run, required client data and database will be initialized automatically).")
+          $lines.Add("3. Set realmlist to ${bt}set realmlist 127.0.0.1${bt} and create an account via the server console:")
           $lines.Add("   ${bt3}text")
           $lines.Add("   account create <username> <password>")
           $lines.Add("   account set gmlevel <username> 3 -1")
