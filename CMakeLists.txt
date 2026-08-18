@@ -308,7 +308,7 @@ if(WIN32)
     endif()
 
     # 8. Portable ZIP Packaging Target
-    set(PORTABLE_ZIP_FILE "${PACKAGE_OUTPUT_DIR}/playerbots-setup-${PACKAGE_VERSION}.zip")
+    set(PORTABLE_ZIP_FILE "${PACKAGE_OUTPUT_DIR}/playerbots-portable-${PACKAGE_VERSION}.zip")
 
     add_custom_target(package_zip
         COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKAGE_OUTPUT_DIR}"
