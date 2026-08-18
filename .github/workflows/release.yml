@@ -40,32 +40,29 @@ jobs:
         shell: pwsh
         run: choco install innosetup --no-progress
 
-      - name: Cache Build Dependencies (Boost, MySQL, OpenSSL)
+      - name: Install Boost
+        uses: MarkusJx/install-boost@v2.4.5
+        id: install-boost
+        with:
+          boost_version: 1.84.0
+
+      - name: Cache Build Dependencies (MySQL, OpenSSL)
         uses: actions/cache@v6
         with:
           path: |
-            C:\local\boost_1_84_0
             C:\tools\mysql\current
             C:\tools\openssl\current
-          key: win-deps-boost-1.84.0-mysql-8.0.46-openssl-3.5.7
+          key: win-deps-mysql-8.0.46-openssl-3.5.7
 
-      - name: Setup Dependencies (Boost, MySQL, OpenSSL)
+      - name: Setup Dependencies (MySQL, OpenSSL)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
-          # 1. Boost 1.84.0 (msvc-14.3, 64-bit)
-          if (-not (Test-Path 'C:\local\boost_1_84_0\boost\version.hpp')) {
-              Write-Host "Downloading Boost 1.84.0..."
-              $boostExe = Join-Path $env:RUNNER_TEMP 'boost.exe'
-              Invoke-WebRequest -Uri 'https://master.dl.sourceforge.net/project/boost/boost-binaries/1.84.0/boost_1_84_0-msvc-14.3-64.exe?viasf=1' -OutFile $boostExe -UserAgent 'Mozilla/5.0' -AllowInsecureRedirect
-              $boostMB = (Get-Item $boostExe).Length / 1MB
-              Write-Host ("Downloaded Boost installer: {0:N1} MB" -f $boostMB)
-              if ($boostMB -lt 50) { throw "Boost installer download failed." }
-              $boostProc = Start-Process -FilePath $boostExe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/DIR=C:\local\boost_1_84_0' -Wait -PassThru
-              if ($boostProc.ExitCode -ne 0) { throw "Boost installer failed with exit code $($boostProc.ExitCode)." }
-          }
-          "BOOST_ROOT=C:\local\boost_1_84_0" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          # 1. Set BOOST_ROOT from install-boost step
+          $boostRoot = "${{ steps.install-boost.outputs.BOOST_ROOT }}"
+          "BOOST_ROOT=$boostRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Using Boost at $boostRoot"
 
           # 2. MySQL Community Server 8.0.46 (64-bit)
           if (-not (Test-Path 'C:\tools\mysql\current\bin\mysqld.exe')) {
