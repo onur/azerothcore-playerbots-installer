@@ -4,16 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Release version (e.g. 0.1.0)'
-        required: false
-        default: '0.1.0'
-      prerelease:
-        description: 'Publish as pre-release'
-        type: boolean
-        default: false
 
 permissions:
   contents: write
@@ -100,12 +90,7 @@ jobs:
         id: get_version
         shell: pwsh
         run: |
-          $ver = "dev"
-          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.version }}") {
-              $ver = "${{ inputs.version }}".TrimStart('v')
-          } elseif ($env:GITHUB_REF -like "refs/tags/v*") {
-              $ver = $env:GITHUB_REF.Substring(11)
-          }
+          $ver = $env:GITHUB_REF_NAME.TrimStart('v')
           Write-Host "Release version: $ver"
           "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "PACKAGE_VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append
@@ -187,12 +172,11 @@ jobs:
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', steps.get_version.outputs.version) }}
-          name: ${{ format('AzerothCore Playerbots v{0}', steps.get_version.outputs.version) }}
+          tag_name: ${{ github.ref_name }}
+          name: AzerothCore Playerbots ${{ github.ref_name }}
           body_path: release_notes.md
-          prerelease: ${{ inputs.prerelease || false }}
+          prerelease: false
           draft: false
           files: |
             output/*.exe
