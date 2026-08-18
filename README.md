@@ -59,18 +59,7 @@ A complete, turnkey Windows distribution for running **[AzerothCore WotLK (3.3.5
 
 `mod-playerbots` populates the world with autonomous player bots that level, quest, run dungeons, participate in PvP, and can be invited into your party/raid.
 
-### Useful In-Game Commands
-
-| Command | Description |
-| :--- | :--- |
-| `.bot add <name>` | Spawn an existing offline character as a bot |
-| `.bot remove <name>` | Remove a bot from the world |
-| `.bot init` | Initialize playerbot accounts / random bots |
-| `.playerbot bot add <class>` | Spawn a random bot of a specific class |
-| `.playerbot bot remove` | Remove targeted bot |
-| `.bot party <action>` | Manage bot party behavior (e.g., follow, attack, stay) |
-
-For comprehensive documentation, strategies, and bot commands, visit the [mod-playerbots documentation](https://github.com/mod-playerbots/mod-playerbots).
+For comprehensive documentation, bot management guides, and a complete list of commands, see the **[Playerbot Commands Wiki](https://github.com/mod-playerbots/mod-playerbots/wiki/Playerbot-Commands)**.
 
 ---
 
