@@ -1,13 +1,13 @@
 [Setup]
 AppName=Playerbots AzerothCore Server
-AppVersion=0.1
+AppVersion=0.1.0
 DefaultDirName={autopf}\Playerbots
 DefaultGroupName=Playerbots
 OutputDir=output
 OutputBaseFilename=Playerbots_Setup
 Compression=lzma2/ultra64
 SolidCompression=yes
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesInstallIn64BitMode=x64compatible
 DisableProgramGroupPage=yes
 DisableReadyPage=yes
 UsePreviousTasks=yes
