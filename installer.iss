@@ -40,8 +40,8 @@ var
   ZipPath, DestDir: string;
   ResultCode: Integer;
 begin
-  // ssPostInstall runs immediately AFTER all files from dist\* are copied to {app}
-  if CurStep = ssPostInstall then
+  // ssInstall runs immediately BEFORE files from dist\* are copied to {app}
+  if CurStep = ssInstall then
   begin
     if WizardIsTaskSelected('downloaddata') then
     begin
