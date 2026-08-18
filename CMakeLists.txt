@@ -261,7 +261,6 @@ if(WIN32)
         # MSIXUpload Packaging Target
         add_custom_target(package_msixupload
             ${MSIXUPLOAD_COMMANDS}
-            DEPENDS azerothcore
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
             COMMENT "Building and packaging Microsoft Store upload bundle: ${MSIX_OUTPUT_FILE}"
         )
@@ -292,7 +291,6 @@ if(WIN32)
         add_custom_target(package_installer
             COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKAGE_OUTPUT_DIR}"
             COMMAND "${INNO_SETUP_COMPILER}" "/DAppVer=${PACKAGE_VERSION}" "/O${PACKAGE_OUTPUT_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/installer.iss"
-            DEPENDS azerothcore
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
             COMMENT "Compiling Inno Setup Windows Installer: ${PACKAGE_OUTPUT_DIR}/playerbots-setup-${PACKAGE_VERSION}.exe"
         )
@@ -315,7 +313,6 @@ if(WIN32)
     add_custom_target(package_zip
         COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKAGE_OUTPUT_DIR}"
         COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_INSTALL_PREFIX_CLEAN}" ${CMAKE_COMMAND} -E tar cf "${PORTABLE_ZIP_FILE}" --format=zip .
-        DEPENDS azerothcore
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         COMMENT "Creating portable zip package: ${PORTABLE_ZIP_FILE}"
     )

@@ -96,21 +96,6 @@ jobs:
               Copy-Item -Recurse -Force "mod-playerbots/*" "azerothcore-wotlk/modules/mod-playerbots/"
           }
 
-      - name: Configure CMake
-        shell: pwsh
-        run: |
-          cmake -B build -S . `
-            -G "Visual Studio 17 2022" -A x64 `
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo `
-            -DMYSQL_ROOT_DIR="$env:MYSQL_ROOT_DIR" `
-            -DOPENSSL_ROOT_DIR="$env:OPENSSL_ROOT_DIR" `
-            -DBOOST_ROOT_DIR="$env:BOOST_ROOT"
-
-      - name: Build & Assemble Distribution
-        shell: pwsh
-        run: |
-          cmake --build build --config RelWithDebInfo --parallel
-
       - name: Determine Version
         id: get_version
         shell: pwsh
@@ -123,18 +108,33 @@ jobs:
           }
           Write-Host "Release version: $ver"
           "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "PACKAGE_VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          cmake -B build -S . `
+            -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+            -DPACKAGE_VERSION="${{ steps.get_version.outputs.version }}" `
+            -DMYSQL_ROOT_DIR="$env:MYSQL_ROOT_DIR" `
+            -DOPENSSL_ROOT_DIR="$env:OPENSSL_ROOT_DIR" `
+            -DBOOST_ROOT_DIR="$env:BOOST_ROOT"
+
+      - name: Build & Assemble Distribution
+        shell: pwsh
+        run: |
+          cmake --build build --config RelWithDebInfo --parallel
 
       - name: Build Inno Setup Installer
         shell: pwsh
         run: |
-          $ver = "${{ steps.get_version.outputs.version }}"
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVer="$ver" installer.iss
+          cmake --build build --config RelWithDebInfo --target package_installer
 
       - name: Create Portable Zip Package
         shell: pwsh
         run: |
-          $ver = "${{ steps.get_version.outputs.version }}"
-          Compress-Archive -Path "dist\*" -DestinationPath "output\playerbots-portable-$ver.zip" -CompressionLevel Optimal
+          cmake --build build --config RelWithDebInfo --target package_zip
 
       - name: Generate SHA-256 Checksums
         shell: pwsh
