@@ -26,6 +26,9 @@ Name: "{commondesktop}\Playerbots Server Launcher"; Filename: "{app}\startup.exe
 [Run]
 Filename: "{app}\startup.exe"; Description: "Launch Playerbots Server"; Flags: nowait postinstall skipifsilent
 
+[UninstallDelete]
+Type: filesandordirs; Name: "{app}\data"
+
 [Code]
 var
   DownloadPage: TDownloadWizardPage;
