@@ -357,13 +357,14 @@ func TestOrderlyShutdown(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Shutdown sequence:
-	cancel()
-
-	// 1. Stop game server first
+	// 1. Mark and stop game server first while db is fully active
+	gameSuper.MarkStopped()
 	gameSuper.StopAndWait(1 * time.Second)
 	recordEvent("game_stopped")
 
-	// 2. Stop db server last
+	// 2. Shut down db server last
+	dbSuper.MarkStopped()
+	cancel()
 	dbSuper.StopAndWait(1 * time.Second)
 	recordEvent("db_stopped")
 
@@ -606,5 +607,48 @@ func TestFindMySQLConfigFile(t *testing.T) {
 	}
 }
 
+func TestIsProcessAlive(t *testing.T) {
+	// Current process PID should be alive
+	alive, _ := isProcessAlive(os.Getpid())
+	if !alive {
+		t.Errorf("expected current process PID %d to be alive", os.Getpid())
+	}
 
+	// Invalid PID should not be alive
+	alive, _ = isProcessAlive(-1)
+	if alive {
+		t.Errorf("expected PID -1 to not be alive")
+	}
+}
 
+func TestWaitForAuthServerReadyProcessExit(t *testing.T) {
+	// Helper process that immediately exits
+	cmd := exec.Command(os.Args[0], "-test.run=TestHelperProcess", "--")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start helper process: %v", err)
+	}
+
+	// Wait for helper process to finish exiting
+	_ = cmd.Wait()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	err := waitForAuthServerReady(ctx, cmd, 37240, 10*time.Second)
+	duration := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected error when process exited, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "exited prematurely") {
+		t.Errorf("expected error message about premature exit, got: %v", err)
+	}
+
+	// Should fail quickly (within 2s), NOT waiting for the 10s timeout
+	if duration > 2*time.Second {
+		t.Errorf("detection took too long (%v), should have detected exit within ~500ms", duration)
+	}
+}
