@@ -6,8 +6,8 @@ A complete, turnkey Windows distribution for running **[AzerothCore WotLK (3.3.5
 
 ## 🚀 Quick Start
 
-1. **Run the Installer**:
-   Download and run the installer (`playerbots-setup-0.1.0.exe`).
+1. **Download and Run the Installer**:
+   Download the latest installer from the **[Latest Release](https://github.com/onur/playerbots-azerothcore-installer/releases/latest)** page and run it.
 2. **Download Client Data**:
    During setup, keep **"Download client data (maps, vmaps, mmaps, dbc)"** checked to automatically download and extract the required game maps.
 3. **Launch the Server**:
