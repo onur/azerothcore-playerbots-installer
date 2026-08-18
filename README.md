@@ -4,60 +4,17 @@ A complete, turnkey Windows distribution for running **[AzerothCore WotLK (3.3.5
 
 ---
 
-## 🌟 Features
+## 🚀 Quick Start
 
-- **Turnkey Server Environment**: Bundles AzerothCore WotLK, `mod-playerbots`, portable MySQL 8.0, runtime libraries, and configurations into a ready-to-run package.
-- **Automated Startup Supervisor (`startup.exe`)**:
-  - **Zero-Configuration Database Initialization**: Automatically initializes MySQL data directories, starts the daemon, creates default databases (`acore_world`, `acore_characters`, `acore_auth`, `acore_playerbots`), and sets up user privileges.
-  - **Dynamic MySQL Tuning**: Detects host system RAM and automatically configures InnoDB buffer pool sizes and instances tailored for `mod-playerbots` workloads.
-  - **Orchestrated Startup**: Starts MySQL first, waits for readiness, launches `authserver`, verifies port connectivity, and then launches `worldserver` with console access.
-  - **Process Supervision & Auto-Restart**: Monitors server processes and automatically restarts `authserver` or `worldserver` if an unexpected crash or exit occurs.
-  - **Clean, Ordered Shutdown**: Captures termination signals (e.g., `Ctrl+C`), gracefully stopping `authserver` and `worldserver` before performing a safe MySQL shutdown to protect against database corruption.
-  - **Configuration Management**: Converts default `.conf.dist` files to active `.conf` files on first run and fixes relative directories (`data`, `logs`, `src`, `mysql`).
-- **Windows Installer (`installer.iss`)**:
-  - Easy graphical installation wizard for 64-bit Windows.
-  - Optional automated download and extraction of required client data files (maps, vmaps, mmaps, and DBC).
-  - Creates desktop and Start Menu shortcuts.
+1. **Run the Installer**:
+   Download and run the installer (`playerbots-setup-0.1.0.exe`).
+2. **Download Client Data**:
+   During setup, keep **"Download client data (maps, vmaps, mmaps, dbc)"** checked to automatically download and extract the required game maps.
+3. **Launch the Server**:
+   Finish setup and launch **Playerbots Server Launcher** from the Start Menu or Desktop.
 
----
-
-## 📁 Repository Structure
-
-```
-playerbots/
-├── azerothcore-wotlk/    # AzerothCore core repository (Git submodule, branch: Playerbot)
-├── mod-playerbots/       # Playerbots AI module (Git submodule, branch: master)
-├── cmd/
-│   └── startup/          # Go source code for the startup supervisor & orchestrator
-├── deps/                 # Local build dependencies (MySQL, OpenSSL, client data)
-├── dist/                 # Staged distribution files (binaries, configs, MySQL, DLLs)
-├── output/               # Generated setup installer executables
-├── CMakeLists.txt        # Superbuild CMake script orchestrating build and packaging
-├── installer.iss         # Inno Setup installer script
-├── startup.exe           # Compiled Windows launcher binary
-└── README.md             # Project documentation
-```
-
----
-
-## 🚀 Quick Start (For Players & Server Admins)
-
-### Option 1: Using the Installer
-
-1. Download or build the installer (`playerbots-setup-0.1.0.exe`).
-2. Run the installer and select your installation directory (default: `C:\Program Files\Playerbots`).
-3. (Recommended) Check **"Download client data (maps, vmaps, mmaps, dbc)"** to allow the installer to automatically fetch and unpack map extraction files.
-4. Finish installation and launch **Playerbots Server Launcher** from the Start Menu or Desktop.
-
-### Option 2: Portable / Manual Run
-
-1. Ensure your extracted client data files (`dbc`, `maps`, `vmaps`, `mmaps`) are placed inside the `data/` folder.
-2. Run `startup.exe` from the root of the distribution directory.
-3. The supervisor will:
-   - Initialize the MySQL database (if running for the first time).
-   - Generate default `.conf` configuration files.
-   - Start MySQL, Authserver, and Worldserver.
-4. When the server finishes booting, you will see the interactive Worldserver console (`AC>`).
+> [!NOTE]
+> **First-Time Startup Notice**: Running the server for the first time may take a couple of minutes to get ready while MySQL initializes and all database SQL migrations are automatically applied. Once the server finishes loading, press <kbd>Enter</kbd> a couple of times in the console to reveal the interactive Worldserver prompt (`AC>`).
 
 ---
 
@@ -70,7 +27,7 @@ playerbots/
    ```
 
 2. **Create an Account**:
-   In the `startup.exe` console window (Worldserver prompt), type:
+   In the `startup.exe` console window (press <kbd>Enter</kbd> a couple of times if the `AC>` prompt is not showing), type:
    ```text
    account create <username> <password>
    account set gmlevel <username> 3 -1
@@ -78,6 +35,23 @@ playerbots/
 
 3. **Log In & Play**:
    Start your WoW 3.3.5a client (`Wow.exe`), enter your credentials, and start playing!
+
+---
+
+## 🌟 Features
+
+- **Turnkey Server Environment**: Bundles AzerothCore WotLK, `mod-playerbots`, portable MySQL 8.0, runtime libraries, and configurations into a ready-to-run package.
+- **Automated Startup Supervisor (`startup.exe`)**:
+  - **Zero-Configuration Database Initialization**: Automatically initializes MySQL data directories, starts the daemon, creates default databases (`acore_world`, `acore_characters`, `acore_auth`, `acore_playerbots`), and sets up user privileges.
+  - **Dynamic MySQL Tuning**: Detects host system RAM and automatically configures InnoDB buffer pool sizes, redo log capacity, and thread instances tailored for `mod-playerbots` workloads.
+  - **Orchestrated Startup**: Starts MySQL first, waits for readiness, launches `authserver`, verifies port connectivity, and then launches `worldserver` with console access.
+  - **Process Supervision & Auto-Restart**: Monitors server processes and automatically restarts `authserver` or `worldserver` if an unexpected crash or exit occurs.
+  - **Clean, Ordered Shutdown**: Captures termination signals (e.g., `Ctrl+C`), gracefully stopping `authserver` and `worldserver` before performing a safe MySQL shutdown to protect against database corruption.
+  - **Configuration Management**: Converts default `.conf.dist` files to active `.conf` files on first run and fixes relative directories (`data`, `logs`, `src`, `mysql`).
+- **Windows Installer (`installer.iss`)**:
+  - Easy graphical installation wizard for 64-bit Windows.
+  - Automated download and extraction of required client data files (maps, vmaps, mmaps, and DBC).
+  - Creates desktop and Start Menu shortcuts.
 
 ---
 
@@ -100,38 +74,13 @@ For comprehensive documentation, strategies, and bot commands, visit the [mod-pl
 
 ---
 
-## ⚙️ Configuration & Startup Options
+## ⚙️ Configuration
 
-### Server Configurations
 Configuration files are located in the `configs/` directory:
 - `configs/worldserver.conf`: Core worldserver settings, rates, networking, and gameplay rules.
 - `configs/authserver.conf`: Authentication server settings and database connection strings.
 - `configs/modules/playerbots.conf`: Detailed Playerbots AI parameters, bot limits, leveling rates, and behaviors.
 - `mysql/my.cnf`: MySQL / InnoDB fine-tuning parameters.
-
-### Launcher CLI Arguments (`startup.exe`)
-
-`startup.exe` accepts command-line flags for custom environments:
-
-```text
-Usage of startup.exe:
-  -mysql-dir string
-        Path to MySQL root directory. Default: ./mysql or $env:MYSQL_ROOT
-  -data-dir string
-        Path to MySQL data directory. Default: <mysql-dir>/data
-  -mysql-cnf string
-        Path to MySQL configuration file (my.cnf or my.ini). Default: auto-detected
-  -port int
-        MySQL server port. (default 3306)
-  -auth-port int
-        Authserver realm port. (default 3724)
-  -timeout int
-        Timeout in seconds to wait for MySQL readiness. (default 30)
-  -init-only
-        Initialize MySQL data dir, apply database SQL script, and exit immediately.
-  -skip-sql
-        Skip executing the embedded create_mysql.sql script.
-```
 
 ---
 
