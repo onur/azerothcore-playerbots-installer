@@ -607,6 +607,62 @@ func findBaseDir() string {
 	return "."
 }
 
+func ensureConfigFiles(baseDir string, mysqlExePath string) error {
+	configDir := filepath.Join(baseDir, "configs")
+	if !dirExists(configDir) {
+		return nil
+	}
+
+	relMySQLExe := "mysql/bin/mysql.exe"
+	if mysqlExePath != "" {
+		if rel, err := filepath.Rel(baseDir, mysqlExePath); err == nil {
+			relMySQLExe = filepath.ToSlash(rel)
+		}
+	} else if runtime.GOOS != "windows" {
+		relMySQLExe = "mysql/bin/mysql"
+	}
+
+	return filepath.Walk(configDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+
+		if strings.HasSuffix(info.Name(), ".conf.dist") {
+			targetConfPath := strings.TrimSuffix(path, ".dist")
+			if !fileExists(targetConfPath) {
+				data, err := os.ReadFile(path)
+				if err != nil {
+					return fmt.Errorf("failed to read %s: %w", path, err)
+				}
+
+				content := string(data)
+				content = strings.Replace(content, `SourceDirectory = ""`, `SourceDirectory = "."`, 1)
+				content = strings.Replace(content, `MySQLExecutable = ""`, fmt.Sprintf(`MySQLExecutable = "%s"`, relMySQLExe), 1)
+
+				if err := os.MkdirAll(filepath.Dir(targetConfPath), 0755); err != nil {
+					return fmt.Errorf("failed to create directory for %s: %w", targetConfPath, err)
+				}
+
+				if err := os.WriteFile(targetConfPath, []byte(content), 0644); err != nil {
+					return fmt.Errorf("failed to write %s: %w", targetConfPath, err)
+				}
+
+				relTarget, err := filepath.Rel(baseDir, targetConfPath)
+				if err != nil {
+					relTarget = targetConfPath
+				}
+				fmt.Printf("Created default config: %s\n", filepath.ToSlash(relTarget))
+			}
+			// Remove the .conf.dist file once .conf is ensured
+			_ = os.Remove(path)
+		}
+		return nil
+	})
+}
+
 func main() {
 	opts, err := parseArgs(os.Args[1:])
 	if err != nil {
@@ -636,6 +692,11 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: worldserver executable not found in %s or PATH\n", baseDir)
 			os.Exit(1)
 		}
+	}
+
+	// Ensure config files (e.g. worldserver.conf, authserver.conf, modules/playerbots.conf) exist from .conf.dist
+	if err := ensureConfigFiles(baseDir, binaries.mysql); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to ensure config files: %v\n", err)
 	}
 
 	// 1. Initialize data directory if needed

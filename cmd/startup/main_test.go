@@ -368,4 +368,96 @@ func TestOrderlyShutdown(t *testing.T) {
 	}
 }
 
+func TestEnsureConfigFiles(t *testing.T) {
+	baseDir := t.TempDir()
+	configDir := filepath.Join(baseDir, "configs")
+	modulesDir := filepath.Join(configDir, "modules")
+	if err := os.MkdirAll(modulesDir, 0755); err != nil {
+		t.Fatalf("failed to create config dirs: %v", err)
+	}
+
+	// 1. Create root level .conf.dist with SourceDirectory and MySQLExecutable
+	worldDistContent := `
+SourceDirectory = ""
+MySQLExecutable = ""
+Rate.XP.Kill = 1
+`
+	if err := os.WriteFile(filepath.Join(configDir, "worldserver.conf.dist"), []byte(worldDistContent), 0644); err != nil {
+		t.Fatalf("failed to write worldserver.conf.dist: %v", err)
+	}
+
+	// 2. Create module level .conf.dist (e.g. playerbots.conf.dist)
+	playerbotsDistContent := `
+Playerbots.Updates.EnableDatabases = 1
+Playerbots.Debug.Enable = 0
+`
+	if err := os.WriteFile(filepath.Join(modulesDir, "playerbots.conf.dist"), []byte(playerbotsDistContent), 0644); err != nil {
+		t.Fatalf("failed to write playerbots.conf.dist: %v", err)
+	}
+
+	// 3. Create pre-existing custom config that should NOT be overwritten
+	existingAuthContent := `
+SourceDirectory = "custom/path"
+MyCustomOption = 42
+`
+	if err := os.WriteFile(filepath.Join(configDir, "authserver.conf.dist"), []byte("SourceDirectory = \"\"\n"), 0644); err != nil {
+		t.Fatalf("failed to write authserver.conf.dist: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "authserver.conf"), []byte(existingAuthContent), 0644); err != nil {
+		t.Fatalf("failed to write authserver.conf: %v", err)
+	}
+
+	mysqlExe := filepath.Join(baseDir, "mysql", "bin", "mysql.exe")
+	if err := ensureConfigFiles(baseDir, mysqlExe); err != nil {
+		t.Fatalf("ensureConfigFiles failed: %v", err)
+	}
+
+	// Verify worldserver.conf created with replacements
+	worldConfBytes, err := os.ReadFile(filepath.Join(configDir, "worldserver.conf"))
+	if err != nil {
+		t.Fatalf("failed to read created worldserver.conf: %v", err)
+	}
+	worldConf := string(worldConfBytes)
+	if !strings.Contains(worldConf, `SourceDirectory = "."`) {
+		t.Errorf("worldserver.conf missing SourceDirectory = \".\": %s", worldConf)
+	}
+	if !strings.Contains(worldConf, `MySQLExecutable = "mysql/bin/mysql.exe"`) {
+		t.Errorf("worldserver.conf missing MySQLExecutable = \"mysql/bin/mysql.exe\": %s", worldConf)
+	}
+	if !strings.Contains(worldConf, `Rate.XP.Kill = 1`) {
+		t.Errorf("worldserver.conf missing content: %s", worldConf)
+	}
+
+	// Verify modules/playerbots.conf created
+	playerbotsConfBytes, err := os.ReadFile(filepath.Join(modulesDir, "playerbots.conf"))
+	if err != nil {
+		t.Fatalf("failed to read created playerbots.conf: %v", err)
+	}
+	playerbotsConf := string(playerbotsConfBytes)
+	if !strings.Contains(playerbotsConf, "Playerbots.Updates.EnableDatabases = 1") {
+		t.Errorf("playerbots.conf missing content: %s", playerbotsConf)
+	}
+
+	// Verify pre-existing authserver.conf was not modified
+	authConfBytes, err := os.ReadFile(filepath.Join(configDir, "authserver.conf"))
+	if err != nil {
+		t.Fatalf("failed to read authserver.conf: %v", err)
+	}
+	if string(authConfBytes) != existingAuthContent {
+		t.Errorf("existing authserver.conf was overwritten! Got: %s, Want: %s", string(authConfBytes), existingAuthContent)
+	}
+
+	// Verify all .conf.dist files were removed
+	if fileExists(filepath.Join(configDir, "worldserver.conf.dist")) {
+		t.Errorf("worldserver.conf.dist was not removed")
+	}
+	if fileExists(filepath.Join(modulesDir, "playerbots.conf.dist")) {
+		t.Errorf("playerbots.conf.dist was not removed")
+	}
+	if fileExists(filepath.Join(configDir, "authserver.conf.dist")) {
+		t.Errorf("authserver.conf.dist was not removed")
+	}
+}
+
+
 
