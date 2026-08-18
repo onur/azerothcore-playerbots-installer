@@ -598,6 +598,21 @@ func runEmbeddedSQL(binaries *mysqlBinaries, port int, sqlContent string) error 
 	return nil
 }
 
+func sanitizeRealmlistFlags(binaries *mysqlBinaries, port int) {
+	// Reset any stale realm flags (e.g. flag 1 or 3) left behind if worldserver was interrupted/killed mid-boot.
+	query := "UPDATE `acore_auth`.`realmlist` SET `flag` = 0 WHERE `flag` IN (1, 3) OR (`flag` & 1) != 0;"
+	args := []string{
+		"-u", "root",
+		"-h", "127.0.0.1",
+		"-P", fmt.Sprintf("%d", port),
+		"--protocol=tcp",
+		"-e", query,
+	}
+
+	cmd := exec.Command(binaries.mysql, args...)
+	_ = cmd.Run()
+}
+
 func startServerProcess(name, exePath, workDir string, stdin *os.File) (*exec.Cmd, error) {
 	cmd := exec.Command(exePath)
 	if workDir != "" {
@@ -1074,6 +1089,9 @@ func main() {
 	// 6. Start authserver and worldserver (staggered)
 	fmt.Println("\n=== [4/4] Starting authserver and worldserver ===")
 
+	// Reset any leftover realm status flags (e.g. flag = 1 or 3 from previous interrupted worldserver boots)
+	sanitizeRealmlistFlags(binaries, opts.port)
+
 	authCmd, err := startServerProcess("authserver", authserverExe, baseDir, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error starting authserver: %v\n", err)
@@ -1120,6 +1138,7 @@ func main() {
 	}, 2*time.Second)
 
 	authSupervisor := newProcessSupervisor("authserver", func() (*exec.Cmd, error) {
+		sanitizeRealmlistFlags(binaries, opts.port)
 		return startServerProcess("authserver", authserverExe, baseDir, nil)
 	}, 2*time.Second)
 
