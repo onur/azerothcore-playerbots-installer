@@ -1,10 +1,12 @@
+#define AppVer "0.1.0"
+
 [Setup]
 AppName=Playerbots AzerothCore Server
-AppVersion=0.1.0
+AppVersion={#AppVer}
 DefaultDirName={autopf}\Playerbots
 DefaultGroupName=Playerbots
 OutputDir=output
-OutputBaseFilename=Playerbots_Setup
+OutputBaseFilename=playerbots-setup-{#AppVer}
 Compression=lzma2/ultra64
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64compatible
