@@ -15,6 +15,9 @@ UsePreviousTasks=yes
 [Files]
 Source: "dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[Dirs]
+Name: "{app}\logs"
+
 [Tasks]
 Name: "downloaddata"; Description: "Download client data (maps, vmaps, mmaps, dbc)"; GroupDescription: "Client Data:"; Flags: checkedonce
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
