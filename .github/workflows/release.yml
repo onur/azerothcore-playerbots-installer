@@ -68,28 +68,7 @@ jobs:
           if (-not (Test-Path 'C:\tools\mysql\current\bin\mysqld.exe')) {
               Write-Host "Downloading MySQL Server 8.0.46..."
               $mysqlZip = Join-Path $env:RUNNER_TEMP 'mysql-8.0.46-winx64.zip'
-              $downloadUrls = @(
-                  'https://cdn.mysql.com/archives/mysql-8.0/mysql-8.0.46-winx64.zip',
-                  'https://dev.mysql.com/get/Downloads/MySQL-8.0/mysql-8.0.46-winx64.zip'
-              )
-              $downloadSuccess = $false
-              foreach ($url in $downloadUrls) {
-                  try {
-                      Write-Host "Attempting download from $url..."
-                      Invoke-WebRequest -Uri $url -OutFile $mysqlZip -UserAgent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' -ErrorAction Stop
-                      if ((Get-Item $mysqlZip).Length -gt 50MB) {
-                          $downloadSuccess = $true
-                          break
-                      }
-                  } catch {
-                      Write-Host "Download from $url failed: $($_.Exception.Message)"
-                  }
-              }
-              if (-not $downloadSuccess) {
-                  Write-Host "Falling back to MySQL 8.0 archive CDN..."
-                  Invoke-WebRequest -Uri 'https://cdn.mysql.com/archives/mysql-8.0/mysql-8.0.40-winx64.zip' -OutFile $mysqlZip -UserAgent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' -ErrorAction Stop
-              }
-
+              Invoke-WebRequest -Uri 'https://dev.mysql.com/get/Downloads/MySQL-8.0/mysql-8.0.46-winx64.zip' -OutFile $mysqlZip -UserAgent 'Mozilla/5.0'
               $mysqlMB = (Get-Item $mysqlZip).Length / 1MB
               Write-Host ("Downloaded MySQL zip: {0:N1} MB" -f $mysqlMB)
               if ($mysqlMB -lt 50) { throw "MySQL zip download failed." }
