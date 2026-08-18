@@ -111,11 +111,6 @@ jobs:
         run: |
           cmake --build build --config RelWithDebInfo --parallel
 
-      - name: Build Inno Setup Installer
-        shell: pwsh
-        run: |
-          cmake --build build --config RelWithDebInfo --target package_installer
-
       - name: Create Portable Zip Package
         shell: pwsh
         run: |
@@ -178,6 +173,4 @@ jobs:
           prerelease: false
           draft: false
           files: |
-            output/*.exe
             output/*.zip
-
