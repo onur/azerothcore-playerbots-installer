@@ -64,10 +64,12 @@ func TestParseArgsDefaults(t *testing.T) {
 func TestParseArgsCustomFlags(t *testing.T) {
 	customDir := t.TempDir()
 	customData := filepath.Join(customDir, "mydata")
+	customCnf := filepath.Join(customDir, "custom.cnf")
 
 	args := []string{
 		"-mysql-dir", customDir,
 		"-data-dir", customData,
+		"-mysql-cnf", customCnf,
 		"-port", "3307",
 		"-auth-port", "3725",
 		"-timeout", "45",
@@ -86,6 +88,10 @@ func TestParseArgsCustomFlags(t *testing.T) {
 
 	if opts.dataDir != customData {
 		t.Errorf("dataDir = %s, want %s", opts.dataDir, customData)
+	}
+
+	if opts.mysqlCnf != customCnf {
+		t.Errorf("mysqlCnf = %s, want %s", opts.mysqlCnf, customCnf)
 	}
 
 	if opts.port != 3307 {
@@ -390,6 +396,7 @@ Rate.XP.Kill = 1
 	playerbotsDistContent := `
 Playerbots.Updates.EnableDatabases = 1
 Playerbots.Debug.Enable = 0
+AiPlayerbot.DisabledWithoutRealPlayer = 0
 `
 	if err := os.WriteFile(filepath.Join(modulesDir, "playerbots.conf.dist"), []byte(playerbotsDistContent), 0644); err != nil {
 		t.Fatalf("failed to write playerbots.conf.dist: %v", err)
@@ -428,7 +435,7 @@ MyCustomOption = 42
 		t.Errorf("worldserver.conf missing content: %s", worldConf)
 	}
 
-	// Verify modules/playerbots.conf created
+	// Verify modules/playerbots.conf created with DisabledWithoutRealPlayer = 1
 	playerbotsConfBytes, err := os.ReadFile(filepath.Join(modulesDir, "playerbots.conf"))
 	if err != nil {
 		t.Fatalf("failed to read created playerbots.conf: %v", err)
@@ -436,6 +443,22 @@ MyCustomOption = 42
 	playerbotsConf := string(playerbotsConfBytes)
 	if !strings.Contains(playerbotsConf, "Playerbots.Updates.EnableDatabases = 1") {
 		t.Errorf("playerbots.conf missing content: %s", playerbotsConf)
+	}
+	if !strings.Contains(playerbotsConf, "AiPlayerbot.DisabledWithoutRealPlayer = 1") {
+		t.Errorf("playerbots.conf missing AiPlayerbot.DisabledWithoutRealPlayer = 1: %s", playerbotsConf)
+	}
+
+	// Verify my.cnf was created in mysql directory
+	myCnfBytes, err := os.ReadFile(filepath.Join(baseDir, "mysql", "my.cnf"))
+	if err != nil {
+		t.Fatalf("failed to read created mysql/my.cnf: %v", err)
+	}
+	myCnf := string(myCnfBytes)
+	if !strings.Contains(myCnf, "innodb_buffer_pool_size") {
+		t.Errorf("my.cnf missing innodb_buffer_pool_size: %s", myCnf)
+	}
+	if !strings.Contains(myCnf, "skip-log-bin") {
+		t.Errorf("my.cnf missing skip-log-bin: %s", myCnf)
 	}
 
 	// Verify pre-existing authserver.conf was not modified
@@ -456,6 +479,126 @@ MyCustomOption = 42
 	}
 	if fileExists(filepath.Join(configDir, "authserver.conf.dist")) {
 		t.Errorf("authserver.conf.dist was not removed")
+	}
+}
+
+func TestCalculateMySQLBufferPoolSettings(t *testing.T) {
+	poolSize, instances, _ := calculateMySQLBufferPoolSettings()
+	if poolSize == "" {
+		t.Error("poolSize should not be empty")
+	}
+	if instances < 1 {
+		t.Errorf("instances should be >= 1, got %d", instances)
+	}
+}
+
+func TestGenerateDefaultMyCnf(t *testing.T) {
+	cnf := generateDefaultMyCnf("32G", 12, 64)
+
+	requiredOptions := []string{
+		"[mysqld]",
+		"innodb_buffer_pool_size = 32G",
+		"innodb_buffer_pool_instances = 12",
+		"innodb_io_capacity = 500",
+		"innodb_io_capacity_max = 2500",
+		"innodb_use_fdatasync = ON",
+		"innodb_log_buffer_size = 32M",
+		"binlog_expire_logs_seconds = 432000",
+		`transaction_isolation = "READ-COMMITTED"`,
+		"skip-log-bin",
+		"innodb_flush_log_at_trx_commit = 2",
+		"max_connections = 500",
+		"max_allowed_packet = 64M",
+		"character-set-server = utf8mb4",
+		"collation-server = utf8mb4_unicode_ci",
+		"table_open_cache = 4000",
+		"table_definition_cache = 2000",
+		"[client]",
+		"[mysql]",
+	}
+
+	for _, opt := range requiredOptions {
+		if !strings.Contains(cnf, opt) {
+			t.Errorf("generateDefaultMyCnf output missing expected line: %s", opt)
+		}
+	}
+}
+
+func TestEnsureMySQLConfigFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	mysqlDir := filepath.Join(tmpDir, "mysql")
+
+	// 1. First run creates my.cnf
+	cnfPath, err := ensureMySQLConfigFile(tmpDir, mysqlDir)
+	if err != nil {
+		t.Fatalf("ensureMySQLConfigFile failed: %v", err)
+	}
+
+	if !fileExists(cnfPath) {
+		t.Fatalf("my.cnf was not created at %s", cnfPath)
+	}
+
+	contentBytes, err := os.ReadFile(cnfPath)
+	if err != nil {
+		t.Fatalf("failed to read created my.cnf: %v", err)
+	}
+	if !strings.Contains(string(contentBytes), "innodb_buffer_pool_size") {
+		t.Errorf("my.cnf content invalid: %s", string(contentBytes))
+	}
+
+	// 2. Custom content should NOT be overwritten on second run
+	customContent := "[mysqld]\ninnodb_buffer_pool_size = 99G\n"
+	if err := os.WriteFile(cnfPath, []byte(customContent), 0644); err != nil {
+		t.Fatalf("failed to write custom my.cnf: %v", err)
+	}
+
+	cnfPath2, err := ensureMySQLConfigFile(tmpDir, mysqlDir)
+	if err != nil {
+		t.Fatalf("second ensureMySQLConfigFile failed: %v", err)
+	}
+	if cnfPath2 != cnfPath {
+		t.Errorf("returned path mismatch: %s vs %s", cnfPath2, cnfPath)
+	}
+
+	reReadBytes, err := os.ReadFile(cnfPath)
+	if err != nil {
+		t.Fatalf("failed to re-read my.cnf: %v", err)
+	}
+	if string(reReadBytes) != customContent {
+		t.Errorf("custom my.cnf was overwritten! Got: %s, Want: %s", string(reReadBytes), customContent)
+	}
+}
+
+func TestFindMySQLConfigFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	mysqlDir := filepath.Join(tmpDir, "mysql")
+	if err := os.MkdirAll(mysqlDir, 0755); err != nil {
+		t.Fatalf("failed to create mysql dir: %v", err)
+	}
+
+	// Nothing exists
+	if found := findMySQLConfigFile("", mysqlDir, tmpDir); found != "" {
+		t.Errorf("found should be empty when no file exists, got: %s", found)
+	}
+
+	// Create custom path
+	customPath := filepath.Join(tmpDir, "custom.ini")
+	if err := os.WriteFile(customPath, []byte("[mysqld]\n"), 0644); err != nil {
+		t.Fatalf("failed to write custom.ini: %v", err)
+	}
+
+	if found := findMySQLConfigFile(customPath, mysqlDir, tmpDir); found != customPath {
+		t.Errorf("expected custom path %s, got %s", customPath, found)
+	}
+
+	// Create mysqlDir/my.cnf
+	myCnfPath := filepath.Join(mysqlDir, "my.cnf")
+	if err := os.WriteFile(myCnfPath, []byte("[mysqld]\n"), 0644); err != nil {
+		t.Fatalf("failed to write my.cnf: %v", err)
+	}
+
+	if found := findMySQLConfigFile("", mysqlDir, tmpDir); found != myCnfPath {
+		t.Errorf("expected %s, got %s", myCnfPath, found)
 	}
 }
 

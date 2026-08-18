@@ -15,6 +15,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unsafe"
 )
 
 const createMySQLSQL = `
@@ -34,6 +35,7 @@ GRANT ALL PRIVILEGES ON ` + "`acore_playerbots`" + ` . * TO 'acore'@'localhost' 
 type startupOptions struct {
 	mysqlDir string
 	dataDir  string
+	mysqlCnf string
 	port     int
 	authPort int
 	timeout  int
@@ -264,6 +266,7 @@ func parseArgs(args []string) (startupOptions, error) {
 
 	fs.StringVar(&opts.mysqlDir, "mysql-dir", defaultMysql, "Path to MySQL root directory. Default: ./mysql or $env:MYSQL_ROOT")
 	fs.StringVar(&opts.dataDir, "data-dir", "", "Path to MySQL data directory. Default: <mysql-dir>/data")
+	fs.StringVar(&opts.mysqlCnf, "mysql-cnf", "", "Path to MySQL configuration file (my.cnf or my.ini). Default: auto-detected in <mysql-dir>")
 	fs.IntVar(&opts.port, "port", 3306, "MySQL server port.")
 	fs.IntVar(&opts.authPort, "auth-port", 3724, "Authserver realm port.")
 	fs.IntVar(&opts.timeout, "timeout", 30, "Timeout in seconds to wait for MySQL to become ready.")
@@ -357,7 +360,7 @@ func isDataDirInitialized(dataDir string) bool {
 	return true
 }
 
-func initializeMySQL(binaries *mysqlBinaries, dataDir string) error {
+func initializeMySQL(binaries *mysqlBinaries, dataDir string, configFile string) error {
 	absDataDir, err := filepath.Abs(dataDir)
 	if err != nil {
 		return fmt.Errorf("failed to resolve absolute data dir: %w", err)
@@ -369,11 +372,20 @@ func initializeMySQL(binaries *mysqlBinaries, dataDir string) error {
 
 	fmt.Printf("=== [1/4] Initializing MySQL data directory at %s ===\n", absDataDir)
 
-	args := []string{
+	var args []string
+	if configFile != "" && fileExists(configFile) {
+		if absCnf, err := filepath.Abs(configFile); err == nil {
+			args = append(args, fmt.Sprintf("--defaults-file=%s", absCnf))
+		} else {
+			args = append(args, fmt.Sprintf("--defaults-file=%s", configFile))
+		}
+	}
+
+	args = append(args,
 		"--initialize-insecure",
 		fmt.Sprintf("--datadir=%s", absDataDir),
 		"--console",
-	}
+	)
 
 	cmd := exec.Command(binaries.mysqld, args...)
 	cmd.Stdout = os.Stdout
@@ -387,17 +399,26 @@ func initializeMySQL(binaries *mysqlBinaries, dataDir string) error {
 	return nil
 }
 
-func startMySQLServer(binaries *mysqlBinaries, dataDir string, port int) (*exec.Cmd, error) {
+func startMySQLServer(binaries *mysqlBinaries, dataDir string, port int, configFile string) (*exec.Cmd, error) {
 	absDataDir, err := filepath.Abs(dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve absolute data dir: %w", err)
 	}
 
-	args := []string{
+	var args []string
+	if configFile != "" && fileExists(configFile) {
+		if absCnf, err := filepath.Abs(configFile); err == nil {
+			args = append(args, fmt.Sprintf("--defaults-file=%s", absCnf))
+		} else {
+			args = append(args, fmt.Sprintf("--defaults-file=%s", configFile))
+		}
+	}
+
+	args = append(args,
 		fmt.Sprintf("--datadir=%s", absDataDir),
 		fmt.Sprintf("--port=%d", port),
 		"--console",
-	}
+	)
 
 	fmt.Printf("=== Starting MySQL server (Port: %d) ===\n", port)
 	cmd := exec.Command(binaries.mysqld, args...)
@@ -435,6 +456,7 @@ func waitForMySQLReady(binaries *mysqlBinaries, port int, timeout time.Duration)
 			// Check via mysqladmin ping
 			args := []string{
 				"-u", "root",
+				"-h", "127.0.0.1",
 				"-P", fmt.Sprintf("%d", port),
 				"--protocol=tcp",
 				"ping",
@@ -481,6 +503,7 @@ func runEmbeddedSQL(binaries *mysqlBinaries, port int, sqlContent string) error 
 
 	args := []string{
 		"-u", "root",
+		"-h", "127.0.0.1",
 		"-P", fmt.Sprintf("%d", port),
 		"--protocol=tcp",
 	}
@@ -531,6 +554,7 @@ func shutdownMySQL(binaries *mysqlBinaries, port int) error {
 
 	args := []string{
 		"-u", "root",
+		"-h", "127.0.0.1",
 		"-P", fmt.Sprintf("%d", port),
 		"--protocol=tcp",
 		"shutdown",
@@ -549,6 +573,7 @@ func shutdownMySQLAndWait(binaries *mysqlBinaries, port int, cmd *exec.Cmd) erro
 
 	args := []string{
 		"-u", "root",
+		"-h", "127.0.0.1",
 		"-P", fmt.Sprintf("%d", port),
 		"--protocol=tcp",
 		"shutdown",
@@ -604,7 +629,209 @@ func findBaseDir() string {
 	return "."
 }
 
-func ensureConfigFiles(baseDir string, mysqlExePath string) error {
+type memoryStatusEx struct {
+	cbSize                  uint32
+	dwMemoryLoad            uint32
+	ullTotalPhys            uint64
+	ullAvailPhys            uint64
+	ullTotalPageFile        uint64
+	ullAvailPageFile        uint64
+	ullTotalVirtual         uint64
+	ullAvailVirtual         uint64
+	ullAvailExtendedVirtual uint64
+}
+
+func getTotalRAMBytes() uint64 {
+	if runtime.GOOS != "windows" {
+		return 0
+	}
+	kernel32 := syscall.NewLazyDLL("kernel32.dll")
+	globalMemoryStatusEx := kernel32.NewProc("GlobalMemoryStatusEx")
+	var mem memoryStatusEx
+	mem.cbSize = uint32(unsafe.Sizeof(mem))
+	ret, _, _ := globalMemoryStatusEx.Call(uintptr(unsafe.Pointer(&mem)))
+	if ret == 0 {
+		return 0
+	}
+	return mem.ullTotalPhys
+}
+
+func calculateMySQLBufferPoolSettings() (sizeStr string, instances int, totalRAMGB int) {
+	totalRAMBytes := getTotalRAMBytes()
+	if totalRAMBytes == 0 {
+		// Fallback default: 4G buffer pool, 4 instances
+		return "4G", 4, 0
+	}
+
+	ramGB := int((totalRAMBytes + (512 * 1024 * 1024)) / (1024 * 1024 * 1024))
+	poolGB := ramGB / 2 // 50% of total RAM
+
+	if poolGB < 1 {
+		return "512M", 1, ramGB
+	}
+
+	instances = poolGB / 2
+	if instances < 1 {
+		instances = 1
+	} else if instances > 16 {
+		instances = 16
+	}
+
+	// For specific high-RAM tiers, match recommended fine tuning values
+	if poolGB >= 32 {
+		instances = 12 // Recommended setting for 64GB RAM / 32G pool
+	}
+
+	return fmt.Sprintf("%dG", poolGB), instances, ramGB
+}
+
+func generateDefaultMyCnf(poolSize string, poolInstances int, totalRAMGB int) string {
+	ramComment := ""
+	if totalRAMGB > 0 {
+		ramComment = fmt.Sprintf("# System RAM detected: ~%d GB (Buffer pool set to ~50%%: %s)\n", totalRAMGB, poolSize)
+	}
+
+	return fmt.Sprintf(`#
+# MySQL / MariaDB Configuration for AzerothCore + mod-playerbots
+#
+# The default MySQL configuration is not adequate for use with Playerbots,
+# and will lead to increased disk activity and decreased performance.
+#
+%s# Note: Buffer pool size should ideally be 50%% of your total RAM.
+#
+
+[mysqld]
+# Basic Network and Connection Settings
+port = 3306
+max_connections = 500
+max_allowed_packet = 64M
+
+# Character Set
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+
+#
+# * Fine Tuning for Playerbots
+#
+
+# INNODB Buffer Pool & I/O
+innodb_buffer_pool_size = %s
+innodb_buffer_pool_instances = %d
+innodb_log_buffer_size = 32M
+innodb_io_capacity = 500
+innodb_io_capacity_max = 2500
+innodb_use_fdatasync = ON
+innodb_read_io_threads = 4
+innodb_write_io_threads = 4
+
+# Performance & SSD Lifespan Optimization:
+# Flushes redo log to OS cache every commit and to disk once per second (massive write boost).
+innodb_flush_log_at_trx_commit = 2
+
+# Table Cache
+table_open_cache = 4000
+table_definition_cache = 2000
+
+# Binary Logging:
+# skip-log-bin reduces ~75-90%% of disk writes by skipping binary logging.
+skip-log-bin
+
+# Max age of binary logs if binary logging is re-enabled - 5 days to prevent binary log pileups
+binlog_expire_logs_seconds = 432000
+
+# Prevent SQL Deadlocks as much as possible
+transaction_isolation = "READ-COMMITTED"
+
+[client]
+default-character-set = utf8mb4
+
+[mysql]
+default-character-set = utf8mb4
+`, ramComment, poolSize, poolInstances)
+}
+
+func findMySQLConfigFile(customPath, mysqlDir, baseDir string) string {
+	if customPath != "" && fileExists(customPath) {
+		return customPath
+	}
+
+	candidates := []string{
+		filepath.Join(mysqlDir, "my.cnf"),
+		filepath.Join(mysqlDir, "my.ini"),
+		filepath.Join(baseDir, "mysql", "my.cnf"),
+		filepath.Join(baseDir, "mysql", "my.ini"),
+		filepath.Join(baseDir, "configs", "my.cnf"),
+		filepath.Join(baseDir, "configs", "my.ini"),
+		filepath.Join(baseDir, "my.cnf"),
+		filepath.Join(baseDir, "my.ini"),
+	}
+
+	for _, cand := range candidates {
+		if cand != "" && fileExists(cand) {
+			return cand
+		}
+	}
+
+	return ""
+}
+
+func ensureMySQLConfigFile(baseDir, mysqlDir string) (string, error) {
+	if existing := findMySQLConfigFile("", mysqlDir, baseDir); existing != "" {
+		if data, err := os.ReadFile(existing); err == nil {
+			content := string(data)
+			if strings.Contains(content, "skip-name-resolve") {
+				cleaned := strings.ReplaceAll(content, "skip-name-resolve\r\n", "")
+				cleaned = strings.ReplaceAll(cleaned, "skip-name-resolve\n", "")
+				cleaned = strings.ReplaceAll(cleaned, "skip-name-resolve", "")
+				_ = os.WriteFile(existing, []byte(cleaned), 0644)
+			}
+		}
+		return existing, nil
+	}
+
+	targetDir := mysqlDir
+	if targetDir == "" {
+		targetDir = filepath.Join(baseDir, "mysql")
+	}
+
+	targetPath := filepath.Join(targetDir, "my.cnf")
+
+	poolSize, instances, ramGB := calculateMySQLBufferPoolSettings()
+	content := generateDefaultMyCnf(poolSize, instances, ramGB)
+
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+		return "", fmt.Errorf("failed to create directory for %s: %w", targetPath, err)
+	}
+
+	if err := os.WriteFile(targetPath, []byte(content), 0644); err != nil {
+		return "", fmt.Errorf("failed to write %s: %w", targetPath, err)
+	}
+
+	relTarget, err := filepath.Rel(baseDir, targetPath)
+	if err != nil {
+		relTarget = targetPath
+	}
+	fmt.Printf("Created default MySQL config: %s (Buffer pool: %s, Instances: %d)\n", filepath.ToSlash(relTarget), poolSize, instances)
+
+	return targetPath, nil
+}
+
+func ensureConfigFiles(baseDir string, mysqlExePath string, mysqlDir ...string) error {
+	resolvedMySQLDir := ""
+	if len(mysqlDir) > 0 && mysqlDir[0] != "" {
+		resolvedMySQLDir = mysqlDir[0]
+	} else if mysqlExePath != "" {
+		resolvedMySQLDir = filepath.Dir(filepath.Dir(mysqlExePath))
+	} else {
+		resolvedMySQLDir = filepath.Join(baseDir, "mysql")
+	}
+
+	// 1. Ensure MySQL configuration file (my.cnf) exists with fine-tuning settings
+	if _, err := ensureMySQLConfigFile(baseDir, resolvedMySQLDir); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to ensure MySQL config file: %v\n", err)
+	}
+
+	// 2. Ensure server configs from .conf.dist in configs/
 	configDir := filepath.Join(baseDir, "configs")
 	if !dirExists(configDir) {
 		return nil
@@ -636,6 +863,11 @@ func ensureConfigFiles(baseDir string, mysqlExePath string) error {
 				content := string(data)
 				content = strings.Replace(content, `SourceDirectory = ""`, `SourceDirectory = "."`, 1)
 				content = strings.Replace(content, `MySQLExecutable = ""`, fmt.Sprintf(`MySQLExecutable = "%s"`, relMySQLExe), 1)
+
+				// Enable AiPlayerbot.DisabledWithoutRealPlayer by default to reduce disk writes when no real players are online
+				if strings.Contains(info.Name(), "playerbots") {
+					content = strings.Replace(content, "AiPlayerbot.DisabledWithoutRealPlayer = 0", "AiPlayerbot.DisabledWithoutRealPlayer = 1", 1)
+				}
 
 				if err := os.MkdirAll(filepath.Dir(targetConfPath), 0755); err != nil {
 					return fmt.Errorf("failed to create directory for %s: %w", targetConfPath, err)
@@ -694,14 +926,16 @@ func main() {
 		}
 	}
 
-	// Ensure config files (e.g. worldserver.conf, authserver.conf, modules/playerbots.conf) exist from .conf.dist
-	if err := ensureConfigFiles(baseDir, binaries.mysql); err != nil {
+	// Ensure config files (e.g. worldserver.conf, authserver.conf, modules/playerbots.conf, mysql/my.cnf) exist
+	if err := ensureConfigFiles(baseDir, binaries.mysql, opts.mysqlDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to ensure config files: %v\n", err)
 	}
 
+	cnfFile := findMySQLConfigFile(opts.mysqlCnf, opts.mysqlDir, baseDir)
+
 	// 1. Initialize data directory if needed
 	if !isDataDirInitialized(opts.dataDir) {
-		if err := initializeMySQL(binaries, opts.dataDir); err != nil {
+		if err := initializeMySQL(binaries, opts.dataDir, cnfFile); err != nil {
 			fmt.Fprintf(os.Stderr, "Error initializing MySQL: %v\n", err)
 			os.Exit(1)
 		}
@@ -711,7 +945,7 @@ func main() {
 
 	// 2. Start MySQL Server
 	fmt.Println("\n=== [2/4] Starting MySQL server ===")
-	mysqlCmd, err := startMySQLServer(binaries, opts.dataDir, opts.port)
+	mysqlCmd, err := startMySQLServer(binaries, opts.dataDir, opts.port, cnfFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error starting MySQL: %v\n", err)
 		os.Exit(1)
@@ -778,7 +1012,7 @@ func main() {
 	var wg sync.WaitGroup
 
 	mysqlSupervisor := newProcessSupervisor("mysqld", func() (*exec.Cmd, error) {
-		cmd, err := startMySQLServer(binaries, opts.dataDir, opts.port)
+		cmd, err := startMySQLServer(binaries, opts.dataDir, opts.port, cnfFile)
 		if err != nil {
 			return nil, err
 		}
