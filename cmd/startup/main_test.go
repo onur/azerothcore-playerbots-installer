@@ -504,10 +504,11 @@ func TestGenerateDefaultMyCnf(t *testing.T) {
 		"[mysqld]",
 		"innodb_buffer_pool_size = 32G",
 		"innodb_buffer_pool_instances = 12",
-		"innodb_io_capacity = 500",
-		"innodb_io_capacity_max = 2500",
+		"innodb_redo_log_capacity = 2G",
+		"innodb_io_capacity = 1000",
+		"innodb_io_capacity_max = 3000",
 		"innodb_use_fdatasync = ON",
-		"innodb_log_buffer_size = 32M",
+		"innodb_log_buffer_size = 64M",
 		"binlog_expire_logs_seconds = 432000",
 		`transaction_isolation = "READ-COMMITTED"`,
 		"skip-log-bin",
@@ -550,9 +551,12 @@ func TestEnsureMySQLConfigFile(t *testing.T) {
 	if !strings.Contains(string(contentBytes), "innodb_buffer_pool_size") {
 		t.Errorf("my.cnf content invalid: %s", string(contentBytes))
 	}
+	if !strings.Contains(string(contentBytes), "innodb_redo_log_capacity") {
+		t.Errorf("my.cnf missing innodb_redo_log_capacity: %s", string(contentBytes))
+	}
 
 	// 2. Custom content should NOT be overwritten on second run
-	customContent := "[mysqld]\ninnodb_buffer_pool_size = 99G\n"
+	customContent := "[mysqld]\ninnodb_buffer_pool_size = 99G\ninnodb_redo_log_capacity = 4G\n"
 	if err := os.WriteFile(cnfPath, []byte(customContent), 0644); err != nil {
 		t.Fatalf("failed to write custom my.cnf: %v", err)
 	}
@@ -571,6 +575,26 @@ func TestEnsureMySQLConfigFile(t *testing.T) {
 	}
 	if string(reReadBytes) != customContent {
 		t.Errorf("custom my.cnf was overwritten! Got: %s, Want: %s", string(reReadBytes), customContent)
+	}
+
+	// 3. Existing config without innodb_redo_log_capacity and with skip-name-resolve should be patched
+	legacyContent := "[mysqld]\nskip-name-resolve\ninnodb_buffer_pool_size = 8G\ninnodb_log_buffer_size = 32M\n"
+	if err := os.WriteFile(cnfPath, []byte(legacyContent), 0644); err != nil {
+		t.Fatalf("failed to write legacy my.cnf: %v", err)
+	}
+	if _, err := ensureMySQLConfigFile(tmpDir, mysqlDir); err != nil {
+		t.Fatalf("ensureMySQLConfigFile on legacy config failed: %v", err)
+	}
+	patchedBytes, err := os.ReadFile(cnfPath)
+	if err != nil {
+		t.Fatalf("failed to read patched my.cnf: %v", err)
+	}
+	patchedStr := string(patchedBytes)
+	if strings.Contains(patchedStr, "skip-name-resolve") {
+		t.Errorf("skip-name-resolve was not removed: %s", patchedStr)
+	}
+	if !strings.Contains(patchedStr, "innodb_redo_log_capacity = 1G") {
+		t.Errorf("innodb_redo_log_capacity was not injected into legacy config: %s", patchedStr)
 	}
 }
 

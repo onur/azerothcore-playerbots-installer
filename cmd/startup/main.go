@@ -784,6 +784,13 @@ func generateDefaultMyCnf(poolSize string, poolInstances int, totalRAMGB int) st
 		ramComment = fmt.Sprintf("# System RAM detected: ~%d GB (Buffer pool set to ~50%%: %s)\n", totalRAMGB, poolSize)
 	}
 
+	redoLogCapacity := "1G"
+	if totalRAMGB >= 16 {
+		redoLogCapacity = "2G"
+	} else if totalRAMGB > 0 && totalRAMGB < 8 {
+		redoLogCapacity = "512M"
+	}
+
 	return fmt.Sprintf(`#
 # MySQL / MariaDB Configuration for AzerothCore + mod-playerbots
 #
@@ -810,9 +817,10 @@ collation-server = utf8mb4_unicode_ci
 # INNODB Buffer Pool & I/O
 innodb_buffer_pool_size = %s
 innodb_buffer_pool_instances = %d
-innodb_log_buffer_size = 32M
-innodb_io_capacity = 500
-innodb_io_capacity_max = 2500
+innodb_redo_log_capacity = %s
+innodb_log_buffer_size = 64M
+innodb_io_capacity = 1000
+innodb_io_capacity_max = 3000
 innodb_use_fdatasync = ON
 innodb_read_io_threads = 4
 innodb_write_io_threads = 4
@@ -840,7 +848,7 @@ default-character-set = utf8mb4
 
 [mysql]
 default-character-set = utf8mb4
-`, ramComment, poolSize, poolInstances)
+`, ramComment, poolSize, poolInstances, redoLogCapacity)
 }
 
 func findMySQLConfigFile(customPath, mysqlDir, baseDir string) string {
@@ -872,11 +880,24 @@ func ensureMySQLConfigFile(baseDir, mysqlDir string) (string, error) {
 	if existing := findMySQLConfigFile("", mysqlDir, baseDir); existing != "" {
 		if data, err := os.ReadFile(existing); err == nil {
 			content := string(data)
+			modified := false
 			if strings.Contains(content, "skip-name-resolve") {
-				cleaned := strings.ReplaceAll(content, "skip-name-resolve\r\n", "")
-				cleaned = strings.ReplaceAll(cleaned, "skip-name-resolve\n", "")
-				cleaned = strings.ReplaceAll(cleaned, "skip-name-resolve", "")
-				_ = os.WriteFile(existing, []byte(cleaned), 0644)
+				content = strings.ReplaceAll(content, "skip-name-resolve\r\n", "")
+				content = strings.ReplaceAll(content, "skip-name-resolve\n", "")
+				content = strings.ReplaceAll(content, "skip-name-resolve", "")
+				modified = true
+			}
+			if !strings.Contains(content, "innodb_redo_log_capacity") {
+				if strings.Contains(content, "innodb_log_buffer_size") {
+					content = strings.Replace(content, "innodb_log_buffer_size", "innodb_redo_log_capacity = 1G\ninnodb_log_buffer_size", 1)
+					modified = true
+				} else if strings.Contains(content, "[mysqld]") {
+					content = strings.Replace(content, "[mysqld]", "[mysqld]\ninnodb_redo_log_capacity = 1G", 1)
+					modified = true
+				}
+			}
+			if modified {
+				_ = os.WriteFile(existing, []byte(content), 0644)
 			}
 		}
 		return existing, nil
