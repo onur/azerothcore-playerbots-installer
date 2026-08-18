@@ -1,20 +1,25 @@
-# AzerothCore Playerbots Installer
+# AzerothCore Playerbots
 
-A complete, turnkey Windows distribution for running **[AzerothCore WotLK (3.3.5a)](https://github.com/azerothcore/azerothcore-wotlk)** pre-integrated with **[mod-playerbots](https://github.com/mod-playerbots/mod-playerbots)**. This project bundles a dedicated process supervisor launcher, automated MySQL initialization with dynamic performance tuning, and an easy-to-use Inno Setup Windows installer.
+A complete, turnkey Windows distribution for running **[AzerothCore WotLK (3.3.5a)](https://github.com/azerothcore/azerothcore-wotlk)** pre-integrated with **[mod-playerbots](https://github.com/mod-playerbots/mod-playerbots)**. This project bundles a dedicated process supervisor launcher, automated MySQL initialization with dynamic performance tuning, and an automated client data downloader into a portable zero-configuration distribution.
 
 ---
 
 ## 🚀 Quick Start
 
-1. **Download and Run the Installer**:
-   Download the latest installer from the **[Latest Release](https://github.com/onur/azerothcore-playerbots-installer/releases/latest)** page and run it.
-2. **Download Client Data**:
-   During setup, keep **"Download client data (maps, vmaps, mmaps, dbc)"** checked to automatically download and extract the required game maps.
+1. **Download the Portable Release**:
+   Download the latest `playerbots-portable-<version>.zip` from the **[Latest Release](https://github.com/onur/azerothcore-playerbots-installer/releases/latest)** page.
+2. **Extract the Archive**:
+   Extract the `.zip` archive into any folder of your choice.
 3. **Launch the Server**:
-   Finish setup and launch **Playerbots Server Launcher** from the Start Menu or Desktop.
+   Double-click `startup.exe` to start the server.
 
 > [!NOTE]
-> **First-Time Startup Notice**: Running the server for the first time may take a couple of minutes to get ready while MySQL initializes and all database SQL migrations are automatically applied. Once the server finishes loading, press <kbd>Enter</kbd> a couple of times in the console to reveal the interactive Worldserver prompt (`AC>`).
+> **First-Time Startup Notice**:
+> On first launch, `startup.exe` will automatically:
+> - Download and extract required client data (maps, vmaps, mmaps, dbc) if not already present.
+> - Initialize the portable MySQL database and apply all SQL migrations.
+>
+> Once the server finishes loading, press <kbd>Enter</kbd> a couple of times in the console to reveal the interactive Worldserver prompt (`AC>`).
 
 ---
 
@@ -40,18 +45,15 @@ A complete, turnkey Windows distribution for running **[AzerothCore WotLK (3.3.5
 
 ## 🌟 Features
 
-- **Turnkey Server Environment**: Bundles AzerothCore WotLK, `mod-playerbots`, portable MySQL 8.0, runtime libraries, and configurations into a ready-to-run package.
+- **Turnkey Portable Distribution**: Bundles AzerothCore WotLK, `mod-playerbots`, portable MySQL 8.0, runtime libraries, and configurations into a ready-to-run package with zero installation required.
 - **Automated Startup Supervisor (`startup.exe`)**:
+  - **Automated Client Data Download**: Automatically detects missing DBC, map, vmap, and mmap assets on first run and downloads/extracts them with real-time progress indicators.
   - **Zero-Configuration Database Initialization**: Automatically initializes MySQL data directories, starts the daemon, creates default databases (`acore_world`, `acore_characters`, `acore_auth`, `acore_playerbots`), and sets up user privileges.
   - **Dynamic MySQL Tuning**: Detects host system RAM and automatically configures InnoDB buffer pool sizes, redo log capacity, and thread instances tailored for `mod-playerbots` workloads.
   - **Orchestrated Startup**: Starts MySQL first, waits for readiness, launches `authserver`, verifies port connectivity, and then launches `worldserver` with console access.
   - **Process Supervision & Auto-Restart**: Monitors server processes and automatically restarts `authserver` or `worldserver` if an unexpected crash or exit occurs.
   - **Clean, Ordered Shutdown**: Captures termination signals (e.g., `Ctrl+C`), gracefully stopping `authserver` and `worldserver` before performing a safe MySQL shutdown to protect against database corruption.
   - **Configuration Management**: Converts default `.conf.dist` files to active `.conf` files on first run and fixes relative directories (`data`, `logs`, `src`, `mysql`).
-- **Windows Installer (`installer.iss`)**:
-  - Easy graphical installation wizard for 64-bit Windows.
-  - Automated download and extraction of required client data files (maps, vmaps, mmaps, and DBC).
-  - Creates desktop and Start Menu shortcuts.
 
 ---
 
@@ -82,7 +84,6 @@ Configuration files are located in the `configs/` directory:
 - **CMake**: Version 3.16 or higher
 - **Go**: Version 1.20 or higher
 - **Git**: With submodule support enabled
-- **Inno Setup**: Version 6.x (for building the installer)
 - **Dependencies**:
   - Boost (1.84.0+)
   - OpenSSL (3.x x64)
@@ -106,30 +107,16 @@ Configuration files are located in the `configs/` directory:
      -DBOOST_ROOT_DIR="C:/local/boost_1_84_0"
    ```
 
-3. **Build and Install to `dist/`**:
+3. **Build and Assemble Distribution to `dist/`**:
    ```powershell
    cmake --build build --config RelWithDebInfo --target install
    ```
 
-4. **Packaging Targets (Optional)**:
-
-   - **Build Inno Setup Installer (`.exe`)**:
-     ```powershell
-     cmake --build build --config RelWithDebInfo --target package_installer
-     ```
-     Generates `output/playerbots-setup-<version>.exe`.
-
-   - **Build Portable ZIP Archive (`.zip`)**:
-     ```powershell
-     cmake --build build --config RelWithDebInfo --target package_zip
-     ```
-     Generates `output/playerbots-setup-<version>.zip`.
-
-   - **Build Microsoft Store Bundle (`.msixupload`)**:
-     ```powershell
-     cmake --build build --config RelWithDebInfo --target package_msixupload
-     ```
-     Generates `output/playerbots.msixupload` ready for submission to Microsoft Partner Center.
+4. **Package Portable ZIP Archive**:
+   ```powershell
+   cmake --build build --config RelWithDebInfo --target package_zip
+   ```
+   Generates `output/playerbots-portable-<version>.zip`.
 
 ---
 
