@@ -383,11 +383,12 @@ func TestEnsureConfigFiles(t *testing.T) {
 		t.Fatalf("failed to create config dirs: %v", err)
 	}
 
-	// 1. Create root level .conf.dist with SourceDirectory, MySQLExecutable, and DataDir
+	// 1. Create root level .conf.dist with SourceDirectory, MySQLExecutable, DataDir, and BindIP
 	worldDistContent := `
 SourceDirectory = ""
 MySQLExecutable = ""
 DataDir = "."
+BindIP = "0.0.0.0"
 Rate.XP.Kill = 1
 `
 	if err := os.WriteFile(filepath.Join(configDir, "worldserver.conf.dist"), []byte(worldDistContent), 0644); err != nil {
@@ -436,6 +437,9 @@ MyCustomOption = 42
 	if !strings.Contains(worldConf, `DataDir = "data"`) {
 		t.Errorf("worldserver.conf missing DataDir = \"data\": %s", worldConf)
 	}
+	if !strings.Contains(worldConf, `BindIP = "127.0.0.1"`) {
+		t.Errorf("worldserver.conf missing BindIP = \"127.0.0.1\": %s", worldConf)
+	}
 	if !strings.Contains(worldConf, `Rate.XP.Kill = 1`) {
 		t.Errorf("worldserver.conf missing content: %s", worldConf)
 	}
@@ -453,12 +457,15 @@ MyCustomOption = 42
 		t.Errorf("playerbots.conf missing AiPlayerbot.DisabledWithoutRealPlayer = 1: %s", playerbotsConf)
 	}
 
-	// Verify my.cnf was created in mysql directory
+	// Verify my.cnf was created in mysql directory with loopback
 	myCnfBytes, err := os.ReadFile(filepath.Join(baseDir, "mysql", "my.cnf"))
 	if err != nil {
 		t.Fatalf("failed to read created mysql/my.cnf: %v", err)
 	}
 	myCnf := string(myCnfBytes)
+	if !strings.Contains(myCnf, "bind-address = 127.0.0.1") {
+		t.Errorf("my.cnf missing bind-address = 127.0.0.1: %s", myCnf)
+	}
 	if !strings.Contains(myCnf, "innodb_buffer_pool_size") {
 		t.Errorf("my.cnf missing innodb_buffer_pool_size: %s", myCnf)
 	}
@@ -475,15 +482,34 @@ MyCustomOption = 42
 		t.Errorf("existing authserver.conf was overwritten! Got: %s, Want: %s", string(authConfBytes), existingAuthContent)
 	}
 
-	// Verify all .conf.dist files were removed
-	if fileExists(filepath.Join(configDir, "worldserver.conf.dist")) {
-		t.Errorf("worldserver.conf.dist was not removed")
+	// Verify .conf.dist templates remain preserved in baseDir
+	if !fileExists(filepath.Join(configDir, "worldserver.conf.dist")) {
+		t.Errorf("worldserver.conf.dist template should be preserved")
 	}
-	if fileExists(filepath.Join(modulesDir, "playerbots.conf.dist")) {
-		t.Errorf("playerbots.conf.dist was not removed")
+	if !fileExists(filepath.Join(modulesDir, "playerbots.conf.dist")) {
+		t.Errorf("playerbots.conf.dist template should be preserved")
 	}
-	if fileExists(filepath.Join(configDir, "authserver.conf.dist")) {
-		t.Errorf("authserver.conf.dist was not removed")
+	if !fileExists(filepath.Join(configDir, "authserver.conf.dist")) {
+		t.Errorf("authserver.conf.dist template should be preserved")
+	}
+}
+
+func TestGetWorkDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("PLAYERBOTS_WORKDIR", tmpDir)
+
+	workDir := getWorkDir()
+	if workDir != tmpDir {
+		t.Errorf("getWorkDir() = %s, want %s", workDir, tmpDir)
+	}
+
+	// Verify required subdirectories are created
+	subdirs := []string{"configs", "logs", "data", "mysql", "mysql/data"}
+	for _, sub := range subdirs {
+		path := filepath.Join(tmpDir, sub)
+		if !dirExists(path) {
+			t.Errorf("expected directory to be created: %s", path)
+		}
 	}
 }
 
@@ -556,7 +582,7 @@ func TestEnsureMySQLConfigFile(t *testing.T) {
 	}
 
 	// 2. Custom content should NOT be overwritten on second run
-	customContent := "[mysqld]\ninnodb_buffer_pool_size = 99G\ninnodb_redo_log_capacity = 4G\n"
+	customContent := "[mysqld]\nbind-address = 127.0.0.1\nmysqlx = 0\ninnodb_buffer_pool_size = 99G\ninnodb_redo_log_capacity = 4G\n"
 	if err := os.WriteFile(cnfPath, []byte(customContent), 0644); err != nil {
 		t.Fatalf("failed to write custom my.cnf: %v", err)
 	}
@@ -577,7 +603,7 @@ func TestEnsureMySQLConfigFile(t *testing.T) {
 		t.Errorf("custom my.cnf was overwritten! Got: %s, Want: %s", string(reReadBytes), customContent)
 	}
 
-	// 3. Existing config without innodb_redo_log_capacity and with skip-name-resolve should be patched
+	// 3. Existing config without innodb_redo_log_capacity, without bind-address and with skip-name-resolve should be patched
 	legacyContent := "[mysqld]\nskip-name-resolve\ninnodb_buffer_pool_size = 8G\ninnodb_log_buffer_size = 32M\n"
 	if err := os.WriteFile(cnfPath, []byte(legacyContent), 0644); err != nil {
 		t.Fatalf("failed to write legacy my.cnf: %v", err)
@@ -595,6 +621,9 @@ func TestEnsureMySQLConfigFile(t *testing.T) {
 	}
 	if !strings.Contains(patchedStr, "innodb_redo_log_capacity = 1G") {
 		t.Errorf("innodb_redo_log_capacity was not injected into legacy config: %s", patchedStr)
+	}
+	if !strings.Contains(patchedStr, "bind-address = 127.0.0.1") {
+		t.Errorf("bind-address was not injected into legacy config: %s", patchedStr)
 	}
 }
 

@@ -273,8 +273,8 @@ func parseArgs(args []string) (startupOptions, error) {
 	defaultMysql := findDefaultMySQLDir()
 
 	fs.StringVar(&opts.mysqlDir, "mysql-dir", defaultMysql, "Path to MySQL root directory. Default: ./mysql or $env:MYSQL_ROOT")
-	fs.StringVar(&opts.dataDir, "data-dir", "", "Path to MySQL data directory. Default: <mysql-dir>/data")
-	fs.StringVar(&opts.mysqlCnf, "mysql-cnf", "", "Path to MySQL configuration file (my.cnf or my.ini). Default: auto-detected in <mysql-dir>")
+	fs.StringVar(&opts.dataDir, "data-dir", "", "Path to MySQL data directory. Default: <work-dir>/mysql/data")
+	fs.StringVar(&opts.mysqlCnf, "mysql-cnf", "", "Path to MySQL configuration file (my.cnf or my.ini). Default: auto-detected in <work-dir>/mysql")
 	fs.IntVar(&opts.port, "port", 3306, "MySQL server port.")
 	fs.IntVar(&opts.authPort, "auth-port", 3724, "Authserver realm port.")
 	fs.IntVar(&opts.timeout, "timeout", 30, "Timeout in seconds to wait for MySQL to become ready.")
@@ -289,10 +289,6 @@ func parseArgs(args []string) (startupOptions, error) {
 
 	if err := fs.Parse(args); err != nil {
 		return opts, err
-	}
-
-	if opts.dataDir == "" && opts.mysqlDir != "" {
-		opts.dataDir = filepath.Join(opts.mysqlDir, "data")
 	}
 
 	return opts, nil
@@ -428,6 +424,8 @@ func startMySQLServer(binaries *mysqlBinaries, dataDir string, port int, configF
 	args = append(args,
 		fmt.Sprintf("--datadir=%s", absDataDir),
 		fmt.Sprintf("--port=%d", port),
+		"--bind-address=127.0.0.1",
+		"--mysqlx=0",
 		"--console",
 	)
 
@@ -801,7 +799,9 @@ func generateDefaultMyCnf(poolSize string, poolInstances int, totalRAMGB int) st
 #
 
 [mysqld]
-# Basic Network and Connection Settings
+# Basic Network and Connection Settings (Loopback only to avoid firewall alerts)
+bind-address = 127.0.0.1
+mysqlx = 0
 port = 3306
 max_connections = 500
 max_allowed_packet = 64M
@@ -851,26 +851,26 @@ default-character-set = utf8mb4
 `, ramComment, poolSize, poolInstances, redoLogCapacity)
 }
 
-func isDirWritable(dir string) bool {
-	if !dirExists(dir) {
-		return false
-	}
-	testFile := filepath.Join(dir, fmt.Sprintf(".write_test_%d", time.Now().UnixNano()))
-	if err := os.WriteFile(testFile, []byte("ok"), 0644); err != nil {
-		return false
-	}
-	_ = os.Remove(testFile)
-	return true
-}
-
-func getWorkDir(baseDir string) string {
-	if isDirWritable(baseDir) {
-		return baseDir
+func getWorkDir() string {
+	if envDir := os.Getenv("PLAYERBOTS_WORKDIR"); envDir != "" {
+		_ = os.MkdirAll(envDir, 0755)
+		_ = os.MkdirAll(filepath.Join(envDir, "configs"), 0755)
+		_ = os.MkdirAll(filepath.Join(envDir, "logs"), 0755)
+		_ = os.MkdirAll(filepath.Join(envDir, "data"), 0755)
+		_ = os.MkdirAll(filepath.Join(envDir, "mysql"), 0755)
+		_ = os.MkdirAll(filepath.Join(envDir, "mysql", "data"), 0755)
+		return envDir
 	}
 
 	localAppData := os.Getenv("LOCALAPPDATA")
 	if localAppData == "" {
-		localAppData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local")
+		if userProfile := os.Getenv("USERPROFILE"); userProfile != "" {
+			localAppData = filepath.Join(userProfile, "AppData", "Local")
+		} else if home := os.Getenv("HOME"); home != "" {
+			localAppData = filepath.Join(home, ".local", "share")
+		} else {
+			localAppData = "."
+		}
 	}
 
 	appDir := filepath.Join(localAppData, "Playerbots")
@@ -879,6 +879,7 @@ func getWorkDir(baseDir string) string {
 	_ = os.MkdirAll(filepath.Join(appDir, "logs"), 0755)
 	_ = os.MkdirAll(filepath.Join(appDir, "data"), 0755)
 	_ = os.MkdirAll(filepath.Join(appDir, "mysql"), 0755)
+	_ = os.MkdirAll(filepath.Join(appDir, "mysql", "data"), 0755)
 	return appDir
 }
 
@@ -887,10 +888,7 @@ func findMySQLConfigFile(customPath, mysqlDir, baseDir string, workDir ...string
 		return customPath
 	}
 
-	candidates := []string{
-		filepath.Join(mysqlDir, "my.cnf"),
-		filepath.Join(mysqlDir, "my.ini"),
-	}
+	var candidates []string
 
 	for _, w := range workDir {
 		if w != "" {
@@ -903,6 +901,13 @@ func findMySQLConfigFile(customPath, mysqlDir, baseDir string, workDir ...string
 				filepath.Join(w, "my.ini"),
 			)
 		}
+	}
+
+	if mysqlDir != "" {
+		candidates = append(candidates,
+			filepath.Join(mysqlDir, "my.cnf"),
+			filepath.Join(mysqlDir, "my.ini"),
+		)
 	}
 
 	candidates = append(candidates,
@@ -925,38 +930,36 @@ func findMySQLConfigFile(customPath, mysqlDir, baseDir string, workDir ...string
 
 func ensureMySQLConfigFile(baseDir, workDir, mysqlDir string) (string, error) {
 	if existing := findMySQLConfigFile("", mysqlDir, baseDir, workDir); existing != "" {
-		if isDirWritable(filepath.Dir(existing)) {
-			if data, err := os.ReadFile(existing); err == nil {
-				content := string(data)
-				modified := false
-				if strings.Contains(content, "skip-name-resolve") {
-					content = strings.ReplaceAll(content, "skip-name-resolve\r\n", "")
-					content = strings.ReplaceAll(content, "skip-name-resolve\n", "")
-					content = strings.ReplaceAll(content, "skip-name-resolve", "")
+		if data, err := os.ReadFile(existing); err == nil {
+			content := string(data)
+			modified := false
+			if strings.Contains(content, "skip-name-resolve") {
+				content = strings.ReplaceAll(content, "skip-name-resolve\r\n", "")
+				content = strings.ReplaceAll(content, "skip-name-resolve\n", "")
+				content = strings.ReplaceAll(content, "skip-name-resolve", "")
+				modified = true
+			}
+			if !strings.Contains(content, "innodb_redo_log_capacity") {
+				if strings.Contains(content, "innodb_log_buffer_size") {
+					content = strings.Replace(content, "innodb_log_buffer_size", "innodb_redo_log_capacity = 1G\ninnodb_log_buffer_size", 1)
+					modified = true
+				} else if strings.Contains(content, "[mysqld]") {
+					content = strings.Replace(content, "[mysqld]", "[mysqld]\ninnodb_redo_log_capacity = 1G", 1)
 					modified = true
 				}
-				if !strings.Contains(content, "innodb_redo_log_capacity") {
-					if strings.Contains(content, "innodb_log_buffer_size") {
-						content = strings.Replace(content, "innodb_log_buffer_size", "innodb_redo_log_capacity = 1G\ninnodb_log_buffer_size", 1)
-						modified = true
-					} else if strings.Contains(content, "[mysqld]") {
-						content = strings.Replace(content, "[mysqld]", "[mysqld]\ninnodb_redo_log_capacity = 1G", 1)
-						modified = true
-					}
-				}
-				if modified {
-					_ = os.WriteFile(existing, []byte(content), 0644)
-				}
+			}
+			if !strings.Contains(content, "bind-address") && strings.Contains(content, "[mysqld]") {
+				content = strings.Replace(content, "[mysqld]", "[mysqld]\nbind-address = 127.0.0.1\nmysqlx = 0", 1)
+				modified = true
+			}
+			if modified {
+				_ = os.WriteFile(existing, []byte(content), 0644)
 			}
 		}
 		return existing, nil
 	}
 
 	targetDir := filepath.Join(workDir, "mysql")
-	if !isDirWritable(workDir) && mysqlDir != "" && isDirWritable(mysqlDir) {
-		targetDir = mysqlDir
-	}
-
 	targetPath := filepath.Join(targetDir, "my.cnf")
 
 	poolSize, instances, ramGB := calculateMySQLBufferPoolSettings()
@@ -1016,6 +1019,15 @@ func ensureConfigFiles(baseDir, workDir string, mysqlExePath string, mysqlDir ..
 		srcDirForConf = filepath.ToSlash(srcDirAbs)
 	}
 
+	dataDirForConf := "data"
+	baseDataDir := filepath.Join(baseDir, "data")
+	workDataDir := filepath.Join(workDir, "data")
+	if dirExists(baseDataDir) && baseDataDir != workDataDir {
+		if entries, err := os.ReadDir(baseDataDir); err == nil && len(entries) > 0 {
+			dataDirForConf = filepath.ToSlash(baseDataDir)
+		}
+	}
+
 	return filepath.Walk(configSrcDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -1024,7 +1036,7 @@ func ensureConfigFiles(baseDir, workDir string, mysqlExePath string, mysqlDir ..
 			return nil
 		}
 
-		if strings.HasSuffix(info.Name(), ".conf.dist") || (workDir != baseDir && strings.HasSuffix(info.Name(), ".conf")) {
+		if strings.HasSuffix(info.Name(), ".conf.dist") || strings.HasSuffix(info.Name(), ".conf") {
 			relPath, err := filepath.Rel(configSrcDir, path)
 			if err != nil {
 				relPath = info.Name()
@@ -1039,10 +1051,11 @@ func ensureConfigFiles(baseDir, workDir string, mysqlExePath string, mysqlDir ..
 				}
 
 				content := string(data)
-				content = strings.Replace(content, `DataDir = "."`, `DataDir = "data"`, 1)
+				content = strings.Replace(content, `DataDir = "."`, fmt.Sprintf(`DataDir = "%s"`, dataDirForConf), 1)
 				content = strings.Replace(content, `LogsDir = ""`, `LogsDir = "logs"`, 1)
 				content = strings.Replace(content, `SourceDirectory = ""`, fmt.Sprintf(`SourceDirectory = "%s"`, srcDirForConf), 1)
 				content = strings.Replace(content, `MySQLExecutable = ""`, fmt.Sprintf(`MySQLExecutable = "%s"`, mysqlExeForConf), 1)
+				content = strings.Replace(content, `BindIP = "0.0.0.0"`, `BindIP = "127.0.0.1"`, 1)
 
 				// Enable AiPlayerbot.DisabledWithoutRealPlayer by default to reduce disk writes when no real players are online
 				if strings.Contains(info.Name(), "playerbots") {
@@ -1061,11 +1074,18 @@ func ensureConfigFiles(baseDir, workDir string, mysqlExePath string, mysqlDir ..
 				if err != nil {
 					relTarget = targetConfPath
 				}
-				fmt.Printf("Created default config: %s\n", filepath.ToSlash(relTarget))
-			}
-			// Remove the .conf.dist file once .conf is ensured if baseDir is writable
-			if isDirWritable(baseDir) && strings.HasSuffix(info.Name(), ".conf.dist") {
-				_ = os.Remove(path)
+				fmt.Printf("Created default config: %s (BindIP: 127.0.0.1)\n", filepath.ToSlash(relTarget))
+			} else {
+				// Patch existing config to use 127.0.0.1 if it is still set to 0.0.0.0
+				if data, err := os.ReadFile(targetConfPath); err == nil {
+					cStr := string(data)
+					if strings.Contains(cStr, `BindIP = "0.0.0.0"`) {
+						cStr = strings.Replace(cStr, `BindIP = "0.0.0.0"`, `BindIP = "127.0.0.1"`, 1)
+						_ = os.WriteFile(targetConfPath, []byte(cStr), 0644)
+						relTarget, _ := filepath.Rel(workDir, targetConfPath)
+						fmt.Printf("Updated config %s: BindIP set to 127.0.0.1\n", filepath.ToSlash(relTarget))
+					}
+				}
 			}
 		}
 		return nil
@@ -1094,10 +1114,8 @@ func main() {
 	}
 
 	baseDir := findBaseDir()
-	workDir := getWorkDir(baseDir)
-	if workDir != baseDir {
-		fmt.Printf("Running in packaged mode. Working directory: %s\n", workDir)
-	}
+	workDir := getWorkDir()
+	fmt.Printf("Working directory: %s\n", workDir)
 
 	authserverExe := findExecutable(baseDir, "authserver")
 	worldserverExe := findExecutable(baseDir, "worldserver")
@@ -1113,12 +1131,12 @@ func main() {
 		}
 	}
 
-	// Adjust dataDir if default was relative to a non-writable mysqlDir
-	if opts.dataDir == "" || (!isDirWritable(filepath.Dir(opts.dataDir)) && !isDataDirInitialized(opts.dataDir)) {
+	// Default dataDir to <workDir>/mysql/data
+	if opts.dataDir == "" {
 		opts.dataDir = filepath.Join(workDir, "mysql", "data")
 	}
 
-	// Ensure config files (e.g. worldserver.conf, authserver.conf, modules/playerbots.conf, mysql/my.cnf) exist
+	// Ensure config files (e.g. worldserver.conf, authserver.conf, modules/playerbots.conf, mysql/my.cnf) exist in workDir
 	if err := ensureConfigFiles(baseDir, workDir, binaries.mysql, opts.mysqlDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to ensure config files: %v\n", err)
 	}
