@@ -154,7 +154,6 @@ jobs:
           name: ${{ format('AzerothCore Playerbots v{0}', steps.get_version.outputs.version) }}
           prerelease: ${{ inputs.prerelease || false }}
           draft: false
-          generate_release_notes: true
           files: |
             output/*.exe
             output/*.zip
