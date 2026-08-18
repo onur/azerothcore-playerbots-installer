@@ -1,4 +1,4 @@
-# Playerbots AzerothCore Windows Distribution
+# AzerothCore Playerbots Installer
 
 A complete, turnkey Windows distribution for running **[AzerothCore WotLK (3.3.5a)](https://github.com/azerothcore/azerothcore-wotlk)** pre-integrated with **[mod-playerbots](https://github.com/mod-playerbots/mod-playerbots)**. This project bundles a dedicated process supervisor launcher, automated MySQL initialization with dynamic performance tuning, and an easy-to-use Inno Setup Windows installer.
 
@@ -7,7 +7,7 @@ A complete, turnkey Windows distribution for running **[AzerothCore WotLK (3.3.5
 ## 🚀 Quick Start
 
 1. **Download and Run the Installer**:
-   Download the latest installer from the **[Latest Release](https://github.com/onur/playerbots-azerothcore-installer/releases/latest)** page and run it.
+   Download the latest installer from the **[Latest Release](https://github.com/onur/azerothcore-playerbots-installer/releases/latest)** page and run it.
 2. **Download Client Data**:
    During setup, keep **"Download client data (maps, vmaps, mmaps, dbc)"** checked to automatically download and extract the required game maps.
 3. **Launch the Server**:

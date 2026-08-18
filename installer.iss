@@ -1,7 +1,7 @@
 #define AppVer "0.1.0"
 
 [Setup]
-AppName=Playerbots AzerothCore Server
+AppName=AzerothCore Playerbots Server
 AppVersion={#AppVer}
 DefaultDirName={autopf}\Playerbots
 DefaultGroupName=Playerbots
