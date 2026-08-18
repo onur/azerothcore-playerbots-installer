@@ -191,6 +191,48 @@ if(WIN32)
             COMMENT "Building startup executable: ${CMAKE_INSTALL_PREFIX_CLEAN}/startup.exe"
         )
     endif()
+
+    # 6. MSIX Packaging Target (Windows)
+    file(GLOB WIN_SDK_DIRS "C:/Program Files (x86)/Windows Kits/10/bin/*/x64" "C:/Program Files/Windows Kits/10/bin/*/x64")
+    find_program(MAKEAPPX_EXECUTABLE makeappx
+        HINTS ${WIN_SDK_DIRS}
+        PATHS "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64"
+              "C:/Program Files (x86)/Windows Kits/10/bin/10.0.22621.0/x64"
+              "C:/Program Files (x86)/Windows Kits/10/bin/10.0.19041.0/x64"
+        DOC "Path to makeappx.exe"
+    )
+
+    if(MAKEAPPX_EXECUTABLE)
+        message(STATUS "  MakeAppx       : ${MAKEAPPX_EXECUTABLE}")
+
+        set(MSIX_LAYOUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/msix-layout")
+        set(MSIX_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/output")
+        set(MSIX_OUTPUT_FILE "${MSIX_OUTPUT_DIR}/playerbots.msix")
+
+        set(MSIX_COMMANDS
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${MSIX_LAYOUT_DIR}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${MSIX_OUTPUT_DIR}"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_INSTALL_PREFIX_CLEAN}" "${MSIX_LAYOUT_DIR}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/AppxManifest.xml" "${MSIX_LAYOUT_DIR}/AppxManifest.xml"
+        )
+
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets")
+            list(APPEND MSIX_COMMANDS
+                COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/assets" "${MSIX_LAYOUT_DIR}/assets"
+            )
+        endif()
+
+        list(APPEND MSIX_COMMANDS
+            COMMAND "${MAKEAPPX_EXECUTABLE}" pack /v /d "${MSIX_LAYOUT_DIR}" /p "${MSIX_OUTPUT_FILE}" /o
+        )
+
+        add_custom_target(package_msix
+            ${MSIX_COMMANDS}
+            DEPENDS azerothcore
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            COMMENT "Assembling and packaging MSIX: ${MSIX_OUTPUT_FILE}"
+        )
+    endif()
 else()
     if(GO_EXECUTABLE)
         ExternalProject_Add_Step(azerothcore build_startup_tool

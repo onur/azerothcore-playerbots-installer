@@ -417,7 +417,7 @@ MyCustomOption = 42
 	}
 
 	mysqlExe := filepath.Join(baseDir, "mysql", "bin", "mysql.exe")
-	if err := ensureConfigFiles(baseDir, mysqlExe); err != nil {
+	if err := ensureConfigFiles(baseDir, baseDir, mysqlExe); err != nil {
 		t.Fatalf("ensureConfigFiles failed: %v", err)
 	}
 
@@ -535,7 +535,7 @@ func TestEnsureMySQLConfigFile(t *testing.T) {
 	mysqlDir := filepath.Join(tmpDir, "mysql")
 
 	// 1. First run creates my.cnf
-	cnfPath, err := ensureMySQLConfigFile(tmpDir, mysqlDir)
+	cnfPath, err := ensureMySQLConfigFile(tmpDir, tmpDir, mysqlDir)
 	if err != nil {
 		t.Fatalf("ensureMySQLConfigFile failed: %v", err)
 	}
@@ -561,7 +561,7 @@ func TestEnsureMySQLConfigFile(t *testing.T) {
 		t.Fatalf("failed to write custom my.cnf: %v", err)
 	}
 
-	cnfPath2, err := ensureMySQLConfigFile(tmpDir, mysqlDir)
+	cnfPath2, err := ensureMySQLConfigFile(tmpDir, tmpDir, mysqlDir)
 	if err != nil {
 		t.Fatalf("second ensureMySQLConfigFile failed: %v", err)
 	}
@@ -582,7 +582,7 @@ func TestEnsureMySQLConfigFile(t *testing.T) {
 	if err := os.WriteFile(cnfPath, []byte(legacyContent), 0644); err != nil {
 		t.Fatalf("failed to write legacy my.cnf: %v", err)
 	}
-	if _, err := ensureMySQLConfigFile(tmpDir, mysqlDir); err != nil {
+	if _, err := ensureMySQLConfigFile(tmpDir, tmpDir, mysqlDir); err != nil {
 		t.Fatalf("ensureMySQLConfigFile on legacy config failed: %v", err)
 	}
 	patchedBytes, err := os.ReadFile(cnfPath)
