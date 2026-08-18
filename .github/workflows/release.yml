@@ -146,15 +146,56 @@ jobs:
           }
           Get-ChildItem
 
+      - name: Generate Release Notes
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.get_version.outputs.version }}"
+          $acoreSha = (git -C azerothcore-wotlk rev-parse HEAD).Trim()
+          $acoreShort = $acoreSha.Substring(0, 8)
+          $acoreDate = (git -C azerothcore-wotlk log -1 --format=%cs).Trim()
+
+          $modSha = (git -C mod-playerbots rev-parse HEAD).Trim()
+          $modShort = $modSha.Substring(0, 8)
+          $modDate = (git -C mod-playerbots log -1 --format=%cs).Trim()
+
+          $packageEmoji = [char]::ConvertFromUtf32(0x1F4E6)
+          $rocketEmoji  = [char]::ConvertFromUtf32(0x1F680)
+          $bt           = '`'
+          $bt3          = '```'
+
+          $lines = @(
+              "Turnkey Windows distribution for AzerothCore WotLK (3.3.5a) and mod-playerbots with an automated installer and startup orchestrator.",
+              "### $packageEmoji Upstream Versions",
+              "- **azerothcore-wotlk**: [$bt$acoreShort$bt](https://github.com/mod-playerbots/azerothcore-wotlk/commit/$acoreSha) (${bt}Playerbot${bt} branch, $acoreDate)",
+              "- **mod-playerbots**: [$bt$modShort$bt](https://github.com/mod-playerbots/mod-playerbots/commit/$modSha) (${bt}master${bt} branch, $modDate)",
+              "",
+              "### $rocketEmoji Quick Start",
+              "1. Download and run **${bt}playerbots-setup-$ver.exe${bt}** from the Assets below.",
+              '2. Check **"Download client data (maps, vmaps, mmaps, dbc)"** during installation.',
+              "3. Launch **Playerbots Server Launcher** from your Desktop or Start Menu.",
+              "4. Set realmlist to ${bt}set realmlist 127.0.0.1${bt} and create an account via the server console:",
+              "   ${bt3}text",
+              "   account create <username> <password>",
+              "   account set gmlevel <username> 3 -1",
+              "   ${bt3}"
+          )
+
+          $notes = $lines -join "`n"
+          [System.IO.File]::WriteAllText("release_notes.md", $notes, [System.Text.UTF8Encoding]::new($false))
+          Write-Host "Generated release notes:"
+          Write-Host $notes
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', steps.get_version.outputs.version) }}
           name: ${{ format('AzerothCore Playerbots v{0}', steps.get_version.outputs.version) }}
+          body_path: release_notes.md
           prerelease: ${{ inputs.prerelease || false }}
           draft: false
           files: |
             output/*.exe
             output/*.zip
             output/*.sha256
+
