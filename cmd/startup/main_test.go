@@ -1,7 +1,10 @@
 package main
 
 import (
+	"archive/zip"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -682,3 +685,256 @@ func TestWaitForAuthServerReadyProcessExit(t *testing.T) {
 		t.Errorf("detection took too long (%v), should have detected exit within ~500ms", duration)
 	}
 }
+
+func TestParseArgsDataFlags(t *testing.T) {
+	args := []string{
+		"-skip-data-check",
+		"-data-url", "https://example.com/custom-data.zip",
+		"-download-data-only",
+	}
+
+	opts, err := parseArgs(args)
+	if err != nil {
+		t.Fatalf("parseArgs failed: %v", err)
+	}
+
+	if !opts.skipDataCheck {
+		t.Errorf("skipDataCheck = false, want true")
+	}
+	if opts.dataURL != "https://example.com/custom-data.zip" {
+		t.Errorf("dataURL = %s, want https://example.com/custom-data.zip", opts.dataURL)
+	}
+	if !opts.downloadDataOnly {
+		t.Errorf("downloadDataOnly = false, want true")
+	}
+}
+
+func TestIsClientDataPresent(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 1. Non-existent directory
+	if isClientDataPresent(filepath.Join(tmpDir, "missing")) {
+		t.Errorf("isClientDataPresent on non-existent dir should be false")
+	}
+
+	// 2. Empty directory
+	emptyDir := filepath.Join(tmpDir, "empty")
+	_ = os.MkdirAll(emptyDir, 0755)
+	if isClientDataPresent(emptyDir) {
+		t.Errorf("isClientDataPresent on empty dir should be false")
+	}
+
+	// 3. Incomplete subfolders (only dbc and maps)
+	partialDir := filepath.Join(tmpDir, "partial")
+	_ = os.MkdirAll(filepath.Join(partialDir, "dbc"), 0755)
+	_ = os.WriteFile(filepath.Join(partialDir, "dbc", "test.dbc"), []byte("dbc"), 0644)
+	_ = os.MkdirAll(filepath.Join(partialDir, "maps"), 0755)
+	_ = os.WriteFile(filepath.Join(partialDir, "maps", "test.map"), []byte("map"), 0644)
+	if isClientDataPresent(partialDir) {
+		t.Errorf("isClientDataPresent with missing vmaps/mmaps should be false")
+	}
+
+	// 4. Subfolders exist but one is empty
+	emptySubDir := filepath.Join(tmpDir, "empty_sub")
+	for _, req := range []string{"dbc", "maps", "vmaps", "mmaps"} {
+		_ = os.MkdirAll(filepath.Join(emptySubDir, req), 0755)
+	}
+	_ = os.WriteFile(filepath.Join(emptySubDir, "dbc", "test.dbc"), []byte("dbc"), 0644)
+	_ = os.WriteFile(filepath.Join(emptySubDir, "maps", "test.map"), []byte("map"), 0644)
+	_ = os.WriteFile(filepath.Join(emptySubDir, "vmaps", "test.vmtree"), []byte("vm"), 0644)
+	// mmaps remains empty
+	if isClientDataPresent(emptySubDir) {
+		t.Errorf("isClientDataPresent with empty mmaps should be false")
+	}
+
+	// 5. Complete client data (all 4 have files)
+	completeDir := filepath.Join(tmpDir, "complete")
+	for _, req := range []string{"dbc", "maps", "vmaps", "mmaps"} {
+		sub := filepath.Join(completeDir, req)
+		_ = os.MkdirAll(sub, 0755)
+		_ = os.WriteFile(filepath.Join(sub, "test.dat"), []byte("data"), 0644)
+	}
+	if !isClientDataPresent(completeDir) {
+		t.Errorf("isClientDataPresent on complete data directory should be true")
+	}
+}
+
+func createTestZip(t *testing.T, zipPath string, files map[string]string) {
+	t.Helper()
+	_ = os.MkdirAll(filepath.Dir(zipPath), 0755)
+	zipFile, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatalf("failed to create zip file: %v", err)
+	}
+	defer zipFile.Close()
+
+	w := zip.NewWriter(zipFile)
+	for name, content := range files {
+		f, err := w.Create(name)
+		if err != nil {
+			t.Fatalf("failed to create zip entry %s: %v", name, err)
+		}
+		if _, err := f.Write([]byte(content)); err != nil {
+			t.Fatalf("failed to write zip entry content for %s: %v", name, err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("failed to close zip writer: %v", err)
+	}
+}
+
+func TestExtractZip(t *testing.T) {
+	tmpDir := t.TempDir()
+	zipPath := filepath.Join(tmpDir, "test.zip")
+	destDir := filepath.Join(tmpDir, "extracted")
+
+	testFiles := map[string]string{
+		"dbc/AreaTable.dbc":  "areatable_data",
+		"maps/0004331.map":   "map_data",
+		"vmaps/000.vmtree":   "vmtree_data",
+		"mmaps/000.mmap":     "mmap_data",
+		"cameras/camera.cam": "cam_data",
+	}
+
+	createTestZip(t, zipPath, testFiles)
+
+	ctx := context.Background()
+	if err := extractZip(ctx, zipPath, destDir); err != nil {
+		t.Fatalf("extractZip failed: %v", err)
+	}
+
+	for relPath, expectedContent := range testFiles {
+		fullPath := filepath.Join(destDir, relPath)
+		if !fileExists(fullPath) {
+			t.Errorf("expected extracted file %s does not exist", fullPath)
+			continue
+		}
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			t.Errorf("failed to read %s: %v", fullPath, err)
+			continue
+		}
+		if string(content) != expectedContent {
+			t.Errorf("file %s content = %s, want %s", relPath, string(content), expectedContent)
+		}
+	}
+}
+
+func TestExtractZipWithDataPrefix(t *testing.T) {
+	tmpDir := t.TempDir()
+	zipPath := filepath.Join(tmpDir, "test_prefix.zip")
+	destDir := filepath.Join(tmpDir, "extracted_prefix")
+
+	testFiles := map[string]string{
+		"Data/dbc/AreaTable.dbc": "areatable_data",
+		"Data/maps/0004331.map":  "map_data",
+		"Data/vmaps/000.vmtree":  "vmtree_data",
+		"Data/mmaps/000.mmap":    "mmap_data",
+	}
+
+	createTestZip(t, zipPath, testFiles)
+
+	ctx := context.Background()
+	if err := extractZip(ctx, zipPath, destDir); err != nil {
+		t.Fatalf("extractZip with Data/ prefix failed: %v", err)
+	}
+
+	// Should be extracted into destDir/dbc, destDir/maps, etc. (prefix stripped)
+	for _, req := range []string{"dbc/AreaTable.dbc", "maps/0004331.map", "vmaps/000.vmtree", "mmaps/000.mmap"} {
+		fullPath := filepath.Join(destDir, req)
+		if !fileExists(fullPath) {
+			t.Errorf("expected file %s does not exist after extracting archive with Data/ prefix", fullPath)
+		}
+	}
+}
+
+func TestDownloadFileWithProgress(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte("mock_zip_binary_data_12345"))
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	destPath := filepath.Join(tmpDir, "downloaded.bin")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := downloadFileWithProgress(ctx, server.URL, destPath); err != nil {
+		t.Fatalf("downloadFileWithProgress failed: %v", err)
+	}
+
+	if !fileExists(destPath) {
+		t.Fatalf("downloaded file %s does not exist", destPath)
+	}
+
+	content, err := os.ReadFile(destPath)
+	if err != nil {
+		t.Fatalf("failed reading downloaded file: %v", err)
+	}
+
+	if string(content) != "mock_zip_binary_data_12345" {
+		t.Errorf("downloaded content = %s, want mock_zip_binary_data_12345", string(content))
+	}
+}
+
+func TestEnsureClientData(t *testing.T) {
+	tmpDir := t.TempDir()
+	workDir := filepath.Join(tmpDir, "work")
+	baseDir := filepath.Join(tmpDir, "base")
+	_ = os.MkdirAll(workDir, 0755)
+	_ = os.MkdirAll(baseDir, 0755)
+
+	ctx := context.Background()
+
+	// 1. skipCheck = true -> should do nothing and return nil
+	if err := ensureClientData(ctx, workDir, baseDir, "", true); err != nil {
+		t.Errorf("ensureClientData with skipCheck=true failed: %v", err)
+	}
+
+	// 2. Client data already exists in baseDir -> should return nil without downloading
+	baseDataDir := filepath.Join(baseDir, "data")
+	for _, req := range []string{"dbc", "maps", "vmaps", "mmaps"} {
+		sub := filepath.Join(baseDataDir, req)
+		_ = os.MkdirAll(sub, 0755)
+		_ = os.WriteFile(filepath.Join(sub, "test.dat"), []byte("data"), 0644)
+	}
+	if err := ensureClientData(ctx, workDir, baseDir, "", false); err != nil {
+		t.Errorf("ensureClientData with existing baseDir client data failed: %v", err)
+	}
+
+	// 3. Missing client data -> download from mock server and extract
+	freshWorkDir := filepath.Join(tmpDir, "fresh_work")
+	freshBaseDir := filepath.Join(tmpDir, "fresh_base")
+
+	// Create valid mock Data.zip
+	mockZipPath := filepath.Join(tmpDir, "mock_Data.zip")
+	testFiles := map[string]string{
+		"dbc/AreaTable.dbc": "areatable_data",
+		"maps/0004331.map":  "map_data",
+		"vmaps/000.vmtree":  "vmtree_data",
+		"mmaps/000.mmap":    "mmap_data",
+	}
+	createTestZip(t, mockZipPath, testFiles)
+	mockZipBytes, err := os.ReadFile(mockZipPath)
+	if err != nil {
+		t.Fatalf("failed reading mock zip: %v", err)
+	}
+
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/zip")
+		_, _ = w.Write(mockZipBytes)
+	}))
+	defer mockServer.Close()
+
+	if err := ensureClientData(ctx, freshWorkDir, freshBaseDir, mockServer.URL, false); err != nil {
+		t.Fatalf("ensureClientData download + extract failed: %v", err)
+	}
+
+	// Verify client data is now present in freshWorkDir/data
+	if !isClientDataPresent(filepath.Join(freshWorkDir, "data")) {
+		t.Errorf("client data was not properly installed into %s", filepath.Join(freshWorkDir, "data"))
+	}
+}
+

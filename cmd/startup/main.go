@@ -1,11 +1,14 @@
 package main
 
 import (
+	"archive/zip"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -17,6 +20,8 @@ import (
 	"time"
 	"unsafe"
 )
+
+const defaultClientDataURL = "https://github.com/wowgaming/client-data/releases/download/v20.0/Data.zip"
 
 const createMySQLSQL = `
 CREATE USER IF NOT EXISTS 'acore'@'localhost' IDENTIFIED BY 'acore' WITH MAX_QUERIES_PER_HOUR 0 MAX_CONNECTIONS_PER_HOUR 0 MAX_UPDATES_PER_HOUR 0;
@@ -33,14 +38,17 @@ GRANT ALL PRIVILEGES ON ` + "`acore_playerbots`" + ` . * TO 'acore'@'localhost' 
 `
 
 type startupOptions struct {
-	mysqlDir string
-	dataDir  string
-	mysqlCnf string
-	port     int
-	authPort int
-	timeout  int
-	initOnly bool
-	skipSQL  bool
+	mysqlDir         string
+	dataDir          string
+	mysqlCnf         string
+	port             int
+	authPort         int
+	timeout          int
+	initOnly         bool
+	skipSQL          bool
+	skipDataCheck    bool
+	dataURL          string
+	downloadDataOnly bool
 }
 
 type mysqlBinaries struct {
@@ -280,6 +288,9 @@ func parseArgs(args []string) (startupOptions, error) {
 	fs.IntVar(&opts.timeout, "timeout", 30, "Timeout in seconds to wait for MySQL to become ready.")
 	fs.BoolVar(&opts.initOnly, "init-only", false, "Initialize MySQL data dir, start server, apply SQL script, and exit.")
 	fs.BoolVar(&opts.skipSQL, "skip-sql", false, "Skip executing the embedded create_mysql.sql script.")
+	fs.BoolVar(&opts.skipDataCheck, "skip-data-check", false, "Skip checking and downloading client data (maps, vmaps, mmaps, dbc).")
+	fs.StringVar(&opts.dataURL, "data-url", defaultClientDataURL, "Custom URL to download client data Data.zip from.")
+	fs.BoolVar(&opts.downloadDataOnly, "download-data-only", false, "Download and extract client data, then exit.")
 
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage of mod-playerbots startup tool:\n\n")
@@ -362,6 +373,296 @@ func isDataDirInitialized(dataDir string) bool {
 	}
 
 	return true
+}
+
+func isClientDataPresent(dataDir string) bool {
+	if !dirExists(dataDir) {
+		return false
+	}
+
+	requiredDirs := []string{"dbc", "maps", "vmaps", "mmaps"}
+	for _, req := range requiredDirs {
+		subDir := filepath.Join(dataDir, req)
+		if !dirExists(subDir) {
+			return false
+		}
+		entries, err := os.ReadDir(subDir)
+		if err != nil || len(entries) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func downloadFileWithProgress(ctx context.Context, url string, destPath string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create download request: %w", err)
+	}
+	req.Header.Set("User-Agent", "AzerothCore-Playerbots-Launcher/1.0")
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+		},
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to connect to %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, resp.Status)
+	}
+
+	tmpPath := destPath + ".download"
+	_ = os.MkdirAll(filepath.Dir(tmpPath), 0755)
+
+	out, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to create temporary file %s: %w", tmpPath, err)
+	}
+
+	cleanedUp := false
+	cleanup := func() {
+		if !cleanedUp {
+			cleanedUp = true
+			out.Close()
+			if fileExists(tmpPath) {
+				_ = os.Remove(tmpPath)
+			}
+		}
+	}
+	defer cleanup()
+
+	totalBytes := resp.ContentLength
+	var downloadedBytes int64
+	buf := make([]byte, 64*1024)
+	startTime := time.Now()
+	lastPrintTime := time.Now()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := out.Write(buf[:n]); writeErr != nil {
+				return fmt.Errorf("failed writing to %s: %w", tmpPath, writeErr)
+			}
+			downloadedBytes += int64(n)
+
+			now := time.Now()
+			if now.Sub(lastPrintTime) >= 200*time.Millisecond || readErr != nil {
+				lastPrintTime = now
+				elapsedSec := now.Sub(startTime).Seconds()
+				speedMBps := 0.0
+				if elapsedSec > 0 {
+					speedMBps = (float64(downloadedBytes) / (1024 * 1024)) / elapsedSec
+				}
+
+				if totalBytes > 0 {
+					percent := float64(downloadedBytes) / float64(totalBytes) * 100.0
+					if percent > 100.0 {
+						percent = 100.0
+					}
+					barWidth := 25
+					filled := int(percent / 100.0 * float64(barWidth))
+					if filled > barWidth {
+						filled = barWidth
+					}
+					bar := strings.Repeat("=", filled)
+					if filled < barWidth {
+						bar += ">" + strings.Repeat(" ", barWidth-filled-1)
+					}
+					etaSec := 0
+					if speedMBps > 0 {
+						remainingMB := float64(totalBytes-downloadedBytes) / (1024 * 1024)
+						etaSec = int(remainingMB / speedMBps)
+					}
+					fmt.Printf("\r  [%s] %5.1f%% (%6.1f / %6.1f MB) %5.1f MB/s (ETA: %ds)  ",
+						bar, percent,
+						float64(downloadedBytes)/(1024*1024),
+						float64(totalBytes)/(1024*1024),
+						speedMBps, etaSec)
+				} else {
+					fmt.Printf("\r  %6.1f MB downloaded (%5.1f MB/s)  ",
+						float64(downloadedBytes)/(1024*1024), speedMBps)
+				}
+			}
+		}
+
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			return fmt.Errorf("error reading response stream: %w", readErr)
+		}
+	}
+
+	fmt.Println()
+	out.Close()
+	cleanedUp = true
+
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		return fmt.Errorf("failed to finalize downloaded file: %w", err)
+	}
+
+	return nil
+}
+
+func extractZip(ctx context.Context, zipPath string, destDir string) error {
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return fmt.Errorf("failed to open zip archive %s: %w", zipPath, err)
+	}
+	defer r.Close()
+
+	cleanDestDir := filepath.Clean(destDir)
+	if err := os.MkdirAll(cleanDestDir, 0755); err != nil {
+		return fmt.Errorf("failed to create destination directory %s: %w", cleanDestDir, err)
+	}
+
+	// Detect if all files share a common root prefix like "Data/" or "data/"
+	hasCommonRoot := false
+	var commonRoot string
+	if len(r.File) > 0 {
+		first := filepath.ToSlash(r.File[0].Name)
+		if idx := strings.Index(first, "/"); idx != -1 {
+			rootCandidate := strings.ToLower(first[:idx])
+			if rootCandidate == "data" {
+				allMatch := true
+				for _, f := range r.File {
+					normalized := filepath.ToSlash(f.Name)
+					if !strings.HasPrefix(strings.ToLower(normalized), "data/") && strings.ToLower(normalized) != "data" {
+						allMatch = false
+						break
+					}
+				}
+				if allMatch {
+					hasCommonRoot = true
+					commonRoot = first[:idx+1]
+				}
+			}
+		}
+	}
+
+	totalFiles := len(r.File)
+	fmt.Printf("Extracting %d files into %s...\n", totalFiles, cleanDestDir)
+
+	for i, f := range r.File {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		relName := f.Name
+		if hasCommonRoot && strings.HasPrefix(relName, commonRoot) {
+			relName = strings.TrimPrefix(relName, commonRoot)
+		}
+		if relName == "" || relName == "." {
+			continue
+		}
+
+		targetPath := filepath.Join(cleanDestDir, relName)
+		cleanTarget := filepath.Clean(targetPath)
+		if !strings.HasPrefix(cleanTarget, cleanDestDir+string(filepath.Separator)) && cleanTarget != cleanDestDir {
+			return fmt.Errorf("illegal file path in zip archive: %s", f.Name)
+		}
+
+		if f.FileInfo().IsDir() {
+			if err := os.MkdirAll(targetPath, 0755); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			return err
+		}
+
+		outFile, err := os.OpenFile(targetPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			return fmt.Errorf("failed to create destination file %s: %w", targetPath, err)
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			outFile.Close()
+			return fmt.Errorf("failed to read zip entry %s: %w", f.Name, err)
+		}
+
+		_, err = io.Copy(outFile, rc)
+		rc.Close()
+		outFile.Close()
+		if err != nil {
+			return fmt.Errorf("failed writing to %s: %w", targetPath, err)
+		}
+
+		if (i+1)%500 == 0 || i+1 == totalFiles {
+			fmt.Printf("\r  Extracting client data: %d / %d files (%d%%)  ", i+1, totalFiles, (i+1)*100/totalFiles)
+		}
+	}
+
+	fmt.Println("\nClient data extracted successfully.")
+	return nil
+}
+
+func ensureClientData(ctx context.Context, workDir, baseDir, dataURL string, skipCheck bool) error {
+	if skipCheck {
+		return nil
+	}
+
+	workDataDir := filepath.Join(workDir, "data")
+	baseDataDir := filepath.Join(baseDir, "data")
+
+	// 1. Check if client data is already present in baseDir/data or workDir/data
+	if dirExists(baseDataDir) && isClientDataPresent(baseDataDir) {
+		fmt.Printf("Client data verified at %s.\n", baseDataDir)
+		return nil
+	}
+	if dirExists(workDataDir) && isClientDataPresent(workDataDir) {
+		fmt.Printf("Client data verified at %s.\n", workDataDir)
+		return nil
+	}
+
+	fmt.Println("\n=== Client Data Verification ===")
+	fmt.Printf("Required client data (dbc, maps, vmaps, mmaps) not found in %s.\n", workDataDir)
+	if dataURL == "" {
+		dataURL = defaultClientDataURL
+	}
+
+	if err := os.MkdirAll(workDataDir, 0755); err != nil {
+		return fmt.Errorf("failed to create data directory %s: %w", workDataDir, err)
+	}
+
+	zipPath := filepath.Join(workDataDir, "Data.zip")
+	fmt.Printf("Downloading client data from %s...\n", dataURL)
+
+	if err := downloadFileWithProgress(ctx, dataURL, zipPath); err != nil {
+		return fmt.Errorf("failed to download client data: %w", err)
+	}
+	defer func() {
+		if fileExists(zipPath) {
+			_ = os.Remove(zipPath)
+		}
+	}()
+
+	if err := extractZip(ctx, zipPath, workDataDir); err != nil {
+		return fmt.Errorf("failed to extract client data: %w", err)
+	}
+
+	if !isClientDataPresent(workDataDir) {
+		return fmt.Errorf("client data extraction completed, but required folders (dbc, maps, vmaps, mmaps) are missing in %s", workDataDir)
+	}
+
+	return nil
 }
 
 func initializeMySQL(binaries *mysqlBinaries, dataDir string, configFile string) error {
@@ -1080,6 +1381,32 @@ func main() {
 	workDir := getWorkDir()
 	fmt.Printf("Working directory: %s\n", workDir)
 
+	// Set up early root context and signal handling so Ctrl+C at any time shuts down child processes
+	rootCtx, rootCancel := context.WithCancel(context.Background())
+	defer rootCancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		select {
+		case sig := <-sigChan:
+			fmt.Printf("\nReceived signal (%v)...\n", sig)
+			rootCancel()
+		case <-rootCtx.Done():
+		}
+	}()
+
+	// Handle -download-data-only mode
+	if opts.downloadDataOnly {
+		if err := ensureClientData(rootCtx, workDir, baseDir, opts.dataURL, false); err != nil {
+			fmt.Fprintf(os.Stderr, "Error downloading client data: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("Client data download and extraction complete.")
+		os.Exit(0)
+	}
+
 	authserverExe := findExecutable(baseDir, "authserver")
 	worldserverExe := findExecutable(baseDir, "worldserver")
 
@@ -1104,23 +1431,15 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Warning: failed to ensure config files: %v\n", err)
 	}
 
-	cnfFile := findMySQLConfigFile(opts.mysqlCnf, opts.mysqlDir, baseDir, workDir)
-
-	// Set up early root context and signal handling so Ctrl+C at any time shuts down child processes
-	rootCtx, rootCancel := context.WithCancel(context.Background())
-	defer rootCancel()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-
-	go func() {
-		select {
-		case sig := <-sigChan:
-			fmt.Printf("\nReceived signal (%v)...\n", sig)
-			rootCancel()
-		case <-rootCtx.Done():
+	// Ensure client data files (maps, vmaps, mmaps, dbc) are present
+	if !opts.initOnly {
+		if err := ensureClientData(rootCtx, workDir, baseDir, opts.dataURL, opts.skipDataCheck); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
 		}
-	}()
+	}
+
+	cnfFile := findMySQLConfigFile(opts.mysqlCnf, opts.mysqlDir, baseDir, workDir)
 
 	// 1. Initialize data directory if needed
 	if !isDataDirInitialized(opts.dataDir) {
