@@ -52,7 +52,7 @@ jobs:
           path: |
             C:\tools\mysql\current
             C:\tools\openssl\current
-          key: win-deps-mysql-8.0.46-openssl-3.5.7
+          key: win-deps-mysql-8.0.40-openssl-3.5.7
 
       - name: Setup Dependencies (MySQL, OpenSSL)
         shell: pwsh
@@ -64,11 +64,11 @@ jobs:
           "BOOST_ROOT=$boostRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "Using Boost at $boostRoot"
 
-          # 2. MySQL Community Server 8.0.46 (64-bit)
+          # 2. MySQL Community Server 8.0 (64-bit)
           if (-not (Test-Path 'C:\tools\mysql\current\bin\mysqld.exe')) {
-              Write-Host "Downloading MySQL Server 8.0.46..."
-              $mysqlZip = Join-Path $env:RUNNER_TEMP 'mysql-8.0.46-winx64.zip'
-              Invoke-WebRequest -Uri 'https://dev.mysql.com/get/Downloads/MySQL-8.0/mysql-8.0.46-winx64.zip' -OutFile $mysqlZip -UserAgent 'Mozilla/5.0'
+              Write-Host "Downloading MySQL Server 8.0..."
+              $mysqlZip = Join-Path $env:RUNNER_TEMP 'mysql-8.0-winx64.zip'
+              curl.exe -sSL --retry 3 -A "Mozilla/5.0" "https://cdn.mysql.com/archives/mysql-8.0/mysql-8.0.40-winx64.zip" -o $mysqlZip
               $mysqlMB = (Get-Item $mysqlZip).Length / 1MB
               Write-Host ("Downloaded MySQL zip: {0:N1} MB" -f $mysqlMB)
               if ($mysqlMB -lt 50) { throw "MySQL zip download failed." }
@@ -84,7 +84,7 @@ jobs:
           if (-not (Test-Path 'C:\tools\openssl\current\x64\include\openssl\opensslv.h')) {
               Write-Host "Downloading FireDaemon OpenSSL 3.5.7..."
               $opensslZip = Join-Path $env:RUNNER_TEMP 'openssl-3.5.7.zip'
-              Invoke-WebRequest -Uri 'https://download.firedaemon.com/FireDaemon-OpenSSL/openssl-3.5.7.zip' -OutFile $opensslZip -UserAgent 'Mozilla/5.0'
+              curl.exe -sSL --retry 3 -A "Mozilla/5.0" "https://download.firedaemon.com/FireDaemon-OpenSSL/openssl-3.5.7.zip" -o $opensslZip
               $opensslMB = (Get-Item $opensslZip).Length / 1MB
               Write-Host ("Downloaded OpenSSL zip: {0:N1} MB" -f $opensslMB)
               if ($opensslMB -lt 10) { throw "OpenSSL zip download failed." }
