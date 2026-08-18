@@ -106,10 +106,10 @@ jobs:
             -DOPENSSL_ROOT_DIR="$env:OPENSSL_ROOT_DIR" `
             -DBOOST_ROOT_DIR="$env:BOOST_ROOT"
 
-      - name: Build & Install
+      - name: Build & Assemble Distribution
         shell: pwsh
         run: |
-          cmake --build build --config RelWithDebInfo --target install --parallel
+          cmake --build build --config RelWithDebInfo --parallel
 
       - name: Determine Version
         id: get_version
