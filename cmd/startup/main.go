@@ -930,32 +930,6 @@ func findMySQLConfigFile(customPath, mysqlDir, baseDir string, workDir ...string
 
 func ensureMySQLConfigFile(baseDir, workDir, mysqlDir string) (string, error) {
 	if existing := findMySQLConfigFile("", mysqlDir, baseDir, workDir); existing != "" {
-		if data, err := os.ReadFile(existing); err == nil {
-			content := string(data)
-			modified := false
-			if strings.Contains(content, "skip-name-resolve") {
-				content = strings.ReplaceAll(content, "skip-name-resolve\r\n", "")
-				content = strings.ReplaceAll(content, "skip-name-resolve\n", "")
-				content = strings.ReplaceAll(content, "skip-name-resolve", "")
-				modified = true
-			}
-			if !strings.Contains(content, "innodb_redo_log_capacity") {
-				if strings.Contains(content, "innodb_log_buffer_size") {
-					content = strings.Replace(content, "innodb_log_buffer_size", "innodb_redo_log_capacity = 1G\ninnodb_log_buffer_size", 1)
-					modified = true
-				} else if strings.Contains(content, "[mysqld]") {
-					content = strings.Replace(content, "[mysqld]", "[mysqld]\ninnodb_redo_log_capacity = 1G", 1)
-					modified = true
-				}
-			}
-			if !strings.Contains(content, "bind-address") && strings.Contains(content, "[mysqld]") {
-				content = strings.Replace(content, "[mysqld]", "[mysqld]\nbind-address = 127.0.0.1\nmysqlx = 0", 1)
-				modified = true
-			}
-			if modified {
-				_ = os.WriteFile(existing, []byte(content), 0644)
-			}
-		}
 		return existing, nil
 	}
 
@@ -1075,17 +1049,6 @@ func ensureConfigFiles(baseDir, workDir string, mysqlExePath string, mysqlDir ..
 					relTarget = targetConfPath
 				}
 				fmt.Printf("Created default config: %s (BindIP: 127.0.0.1)\n", filepath.ToSlash(relTarget))
-			} else {
-				// Patch existing config to use 127.0.0.1 if it is still set to 0.0.0.0
-				if data, err := os.ReadFile(targetConfPath); err == nil {
-					cStr := string(data)
-					if strings.Contains(cStr, `BindIP = "0.0.0.0"`) {
-						cStr = strings.Replace(cStr, `BindIP = "0.0.0.0"`, `BindIP = "127.0.0.1"`, 1)
-						_ = os.WriteFile(targetConfPath, []byte(cStr), 0644)
-						relTarget, _ := filepath.Rel(workDir, targetConfPath)
-						fmt.Printf("Updated config %s: BindIP set to 127.0.0.1\n", filepath.ToSlash(relTarget))
-					}
-				}
 			}
 		}
 		return nil

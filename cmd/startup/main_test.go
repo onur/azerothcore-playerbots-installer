@@ -581,8 +581,8 @@ func TestEnsureMySQLConfigFile(t *testing.T) {
 		t.Errorf("my.cnf missing innodb_redo_log_capacity: %s", string(contentBytes))
 	}
 
-	// 2. Custom content should NOT be overwritten on second run
-	customContent := "[mysqld]\nbind-address = 127.0.0.1\nmysqlx = 0\ninnodb_buffer_pool_size = 99G\ninnodb_redo_log_capacity = 4G\n"
+	// 2. Custom content should NOT be overwritten or modified on second run
+	customContent := "[mysqld]\ninnodb_buffer_pool_size = 99G\ninnodb_redo_log_capacity = 4G\n"
 	if err := os.WriteFile(cnfPath, []byte(customContent), 0644); err != nil {
 		t.Fatalf("failed to write custom my.cnf: %v", err)
 	}
@@ -600,30 +600,7 @@ func TestEnsureMySQLConfigFile(t *testing.T) {
 		t.Fatalf("failed to re-read my.cnf: %v", err)
 	}
 	if string(reReadBytes) != customContent {
-		t.Errorf("custom my.cnf was overwritten! Got: %s, Want: %s", string(reReadBytes), customContent)
-	}
-
-	// 3. Existing config without innodb_redo_log_capacity, without bind-address and with skip-name-resolve should be patched
-	legacyContent := "[mysqld]\nskip-name-resolve\ninnodb_buffer_pool_size = 8G\ninnodb_log_buffer_size = 32M\n"
-	if err := os.WriteFile(cnfPath, []byte(legacyContent), 0644); err != nil {
-		t.Fatalf("failed to write legacy my.cnf: %v", err)
-	}
-	if _, err := ensureMySQLConfigFile(tmpDir, tmpDir, mysqlDir); err != nil {
-		t.Fatalf("ensureMySQLConfigFile on legacy config failed: %v", err)
-	}
-	patchedBytes, err := os.ReadFile(cnfPath)
-	if err != nil {
-		t.Fatalf("failed to read patched my.cnf: %v", err)
-	}
-	patchedStr := string(patchedBytes)
-	if strings.Contains(patchedStr, "skip-name-resolve") {
-		t.Errorf("skip-name-resolve was not removed: %s", patchedStr)
-	}
-	if !strings.Contains(patchedStr, "innodb_redo_log_capacity = 1G") {
-		t.Errorf("innodb_redo_log_capacity was not injected into legacy config: %s", patchedStr)
-	}
-	if !strings.Contains(patchedStr, "bind-address = 127.0.0.1") {
-		t.Errorf("bind-address was not injected into legacy config: %s", patchedStr)
+		t.Errorf("existing custom my.cnf was modified! Got: %s, Want: %s", string(reReadBytes), customContent)
 	}
 }
 
