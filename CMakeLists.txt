@@ -116,7 +116,18 @@ ExternalProject_Add(azerothcore
     INSTALL_DIR "${CMAKE_INSTALL_PREFIX_CLEAN}"
 )
 
-# 5. Windows post-install steps: Copy DLLs, MySQL distribution, and build Go startup tool
+# 5. Post-install steps: Copy SQL migration files, DLLs, MySQL distribution, and build Go startup tool
+ExternalProject_Add_Step(azerothcore copy_sql_files
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/azerothcore-wotlk/data/sql"
+        "${CMAKE_INSTALL_PREFIX_CLEAN}/data/sql"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/mod-playerbots/data/sql"
+        "${CMAKE_INSTALL_PREFIX_CLEAN}/modules/mod-playerbots/data/sql"
+    DEPENDEES install
+    COMMENT "Copying SQL migration files to ${CMAKE_INSTALL_PREFIX_CLEAN}"
+)
+
 if(WIN32)
     # Collect DLLs to copy
     set(DLL_COPY_COMMANDS)
