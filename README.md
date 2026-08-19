@@ -100,8 +100,8 @@ Configuration files are located in the `configs/` directory:
 2. **Configure with CMake**:
    ```powershell
    cmake -B build -S . `
-     -G "Visual Studio 17 2022" -A x64 `
-     -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+     -G "Visual Studio 18 2026" -A x64 `
+     -DCMAKE_BUILD_TYPE=Release `
      -DMYSQL_ROOT_DIR="deps/mysql-8.0.46-winx64" `
      -DOPENSSL_ROOT_DIR="deps/openssl-3.5.7/x64" `
      -DBOOST_ROOT_DIR="C:/local/boost_1_84_0"
@@ -109,14 +109,13 @@ Configuration files are located in the `configs/` directory:
 
 3. **Build and Assemble Distribution to `dist/`**:
    ```powershell
-   cmake --build build --config RelWithDebInfo --target install
-   ```
+   cmake --build build --config Release --parallel
 
 4. **Package Portable ZIP Archive**:
    ```powershell
-   cmake --build build --config RelWithDebInfo --target package_zip
+   cmake --build build --target package_zip
    ```
-   Generates `output/mod-playerbots-portable-<version>.zip`.
+   Generates `output/mod-playerbots-portable-dev.zip`.
 
 ---
 
