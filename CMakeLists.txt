@@ -310,12 +310,36 @@ if(WIN32)
     # 8. Portable ZIP Packaging Target
     set(PORTABLE_ZIP_FILE "${PACKAGE_OUTPUT_DIR}/mod-playerbots-portable-${PACKAGE_VERSION}.zip")
 
-    add_custom_target(package_zip
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKAGE_OUTPUT_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_INSTALL_PREFIX_CLEAN}" ${CMAKE_COMMAND} -E tar cf "${PORTABLE_ZIP_FILE}" --format=zip .
-        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-        COMMENT "Creating portable zip package: ${PORTABLE_ZIP_FILE}"
+    find_program(SEVEN_ZIP_EXECUTABLE NAMES 7z 7za
+        PATHS "C:/Program Files/7-Zip"
+              "C:/Program Files (x86)/7-Zip"
+              "$ENV{ProgramFiles}/7-Zip"
+              "$ENV{ProgramFiles\(x86\)}/7-Zip"
+        DOC "Path to 7-Zip executable"
     )
+
+    if(SEVEN_ZIP_EXECUTABLE)
+        message(STATUS "  7-Zip          : ${SEVEN_ZIP_EXECUTABLE} (Maximum Ultra Compression -mx=9)")
+
+        add_custom_target(package_zip
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKAGE_OUTPUT_DIR}"
+            COMMAND ${CMAKE_COMMAND} -E rm -f "${PORTABLE_ZIP_FILE}"
+            COMMAND "${SEVEN_ZIP_EXECUTABLE}" a -tzip -mx=9 -mmt=on "${PORTABLE_ZIP_FILE}" "*"
+            WORKING_DIRECTORY "${CMAKE_INSTALL_PREFIX_CLEAN}"
+            COMMENT "Creating portable zip package with maximum compression: ${PORTABLE_ZIP_FILE}"
+        )
+    else()
+        message(STATUS "  7-Zip          : NOT FOUND (falling back to cmake -E tar)")
+
+        add_custom_target(package_zip
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKAGE_OUTPUT_DIR}"
+            COMMAND ${CMAKE_COMMAND} -E rm -f "${PORTABLE_ZIP_FILE}"
+            COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_INSTALL_PREFIX_CLEAN}" ${CMAKE_COMMAND} -E tar cf "${PORTABLE_ZIP_FILE}" --format=zip .
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            COMMENT "Creating portable zip package: ${PORTABLE_ZIP_FILE}"
+        )
+    endif()
+
     add_custom_target(package_portable
         DEPENDS package_zip
         COMMENT "Alias for package_zip target"
