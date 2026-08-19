@@ -59,6 +59,8 @@ jobs:
               if (Test-Path 'C:\tools\mysql\current') { Remove-Item -Recurse -Force 'C:\tools\mysql\current' }
               $extractedDir = Get-ChildItem -Path 'C:\tools\mysql' -Directory | Where-Object { $_.Name -like 'mysql-8.0*' } | Select-Object -First 1
               Rename-Item $extractedDir.FullName 'C:\tools\mysql\current'
+              # Remove PDB debug symbols to save runner disk space and cache overhead
+              Get-ChildItem -Path 'C:\tools\mysql\current' -Recurse -Filter '*.pdb' | Remove-Item -Force -ErrorAction SilentlyContinue
           }
           "MYSQL_ROOT_DIR=C:\tools\mysql\current" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
