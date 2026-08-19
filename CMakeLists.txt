@@ -272,42 +272,7 @@ if(WIN32)
         )
     endif()
 
-    # 7. Inno Setup Windows Installer Target
-    find_program(INNO_SETUP_COMPILER iscc
-        PATHS "C:/Program Files/Inno Setup 7"
-              "C:/Program Files (x86)/Inno Setup 7"
-              "C:/Program Files (x86)/Inno Setup 6"
-              "C:/Program Files/Inno Setup 6"
-              "C:/Program Files (x86)/Inno Setup 5"
-              "C:/Program Files/Inno Setup 5"
-              "$ENV{LOCALAPPDATA}/Programs/Inno Setup 7"
-              "$ENV{LOCALAPPDATA}/Programs/Inno Setup 6"
-        DOC "Path to Inno Setup Compiler (ISCC.exe)"
-    )
-
-    if(INNO_SETUP_COMPILER)
-        message(STATUS "  Inno Setup     : ${INNO_SETUP_COMPILER}")
-
-        add_custom_target(package_installer
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKAGE_OUTPUT_DIR}"
-            COMMAND "${INNO_SETUP_COMPILER}" "/DAppVer=${PACKAGE_VERSION}" "/O${PACKAGE_OUTPUT_DIR}" "/Fmod-playerbots-portable-${PACKAGE_VERSION}" "${CMAKE_CURRENT_SOURCE_DIR}/installer.iss"
-            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-            COMMENT "Compiling Inno Setup Windows Installer: ${PACKAGE_OUTPUT_DIR}/mod-playerbots-portable-${PACKAGE_VERSION}.exe"
-        )
-        add_custom_target(package_innosetup
-            DEPENDS package_installer
-            COMMENT "Alias for package_installer target"
-        )
-    else()
-        add_custom_target(package_installer
-            COMMAND ${CMAKE_COMMAND} -E echo "Error: ISCC.exe (Inno Setup) not found. Please install Inno Setup 6 or 7."
-            COMMAND ${CMAKE_COMMAND} -E false
-            COMMENT "Inno Setup packaging unavailable (ISCC.exe not found)"
-        )
-        add_custom_target(package_innosetup DEPENDS package_installer)
-    endif()
-
-    # 8. Portable ZIP Packaging Target
+    # 7. Portable ZIP Packaging Target
     set(PORTABLE_ZIP_FILE "${PACKAGE_OUTPUT_DIR}/mod-playerbots-portable-${PACKAGE_VERSION}.zip")
 
     find_program(SEVEN_ZIP_EXECUTABLE NAMES 7z 7za
