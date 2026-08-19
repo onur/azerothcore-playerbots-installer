@@ -126,7 +126,6 @@ jobs:
 
           $packageEmoji = [char]::ConvertFromUtf32(0x1F4E6)
           $rocketEmoji  = [char]::ConvertFromUtf32(0x1F680)
-          $lockEmoji    = [char]::ConvertFromUtf32(0x1F512)
           $bt           = '`'
           $bt3          = '```'
 
@@ -145,19 +144,18 @@ jobs:
           $lines.Add("   account create <username> <password>")
           $lines.Add("   account set gmlevel <username> 3 -1")
           $lines.Add("   ${bt3}")
-          $lines.Add("")
-          $lines.Add("### $lockEmoji SHA-256 Checksums")
-          $lines.Add("| File | SHA-256 Checksum |")
-          $lines.Add("| :--- | :--- |")
-          Get-ChildItem -Path output -File | Where-Object { $_.Extension -in '.exe', '.zip' } | ForEach-Object {
-              $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower()
-              $lines.Add("| ${bt}$($_.Name)${bt} | ${bt}$hash${bt} |")
-          }
 
           $notes = $lines -join "`n"
           [System.IO.File]::WriteAllText("release_notes.md", $notes, [System.Text.UTF8Encoding]::new($false))
           Write-Host "Generated release notes:"
           Write-Host $notes
+
+          Write-Host ""
+          Write-Host "=== Artifact SHA-256 Checksums ==="
+          Get-ChildItem -Path output -File | ForEach-Object {
+              $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower()
+              Write-Host "$hash  $($_.Name)"
+          }
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
