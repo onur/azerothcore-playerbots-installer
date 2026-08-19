@@ -163,7 +163,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
-          name: AzerothCore Playerbots ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
           body_path: release_notes.md
           prerelease: false
           draft: false
