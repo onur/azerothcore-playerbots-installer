@@ -4,7 +4,7 @@ A complete, turnkey Windows distribution for running **[AzerothCore WotLK (3.3.5
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 1. **Download the Portable Release**:
    Download the latest `mod-playerbots-portable-<version>.zip` from the **[Latest Release](https://github.com/onur/mod-playerbots-portable/releases/latest)** page.
@@ -23,7 +23,7 @@ A complete, turnkey Windows distribution for running **[AzerothCore WotLK (3.3.5
 
 ---
 
-## 🎮 Connecting to the Server
+## Connecting to the Server
 
 1. **Configure Realmlist**:
    Open your World of Warcraft 3.3.5a client directory, edit `Data/enUS/realmlist.wtf` (or your locale's equivalent) and set:
@@ -43,7 +43,7 @@ A complete, turnkey Windows distribution for running **[AzerothCore WotLK (3.3.5
 
 ---
 
-## 🌟 Features
+## Features
 
 - **Turnkey Portable Distribution**: Bundles AzerothCore WotLK, `mod-playerbots`, portable MySQL 8.0, runtime libraries, and configurations into a ready-to-run package with zero installation required.
 - **Automated Startup Supervisor (`startup.exe`)**:
@@ -57,7 +57,7 @@ A complete, turnkey Windows distribution for running **[AzerothCore WotLK (3.3.5
 
 ---
 
-## 🤖 Using Playerbots
+## Using Playerbots
 
 `mod-playerbots` populates the world with autonomous player bots that level, quest, run dungeons, participate in PvP, and can be invited into your party/raid.
 
@@ -65,7 +65,7 @@ For comprehensive documentation, bot management guides, and a complete list of c
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 Configuration files are located in the `configs/` directory:
 - `configs/worldserver.conf`: Core worldserver settings, rates, networking, and gameplay rules.
@@ -75,7 +75,7 @@ Configuration files are located in the `configs/` directory:
 
 ---
 
-## 🛠️ Building from Source
+## Building from Source
 
 ### Prerequisites
 
@@ -120,7 +120,7 @@ Configuration files are located in the `configs/` directory:
 
 ---
 
-## 📜 License
+## License
 
 This project is licensed under the [MIT License](LICENSE).
 

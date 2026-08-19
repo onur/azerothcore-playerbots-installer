@@ -124,19 +124,17 @@ jobs:
           $modShort = $modSha.Substring(0, 8)
           $modDate = (git -C mod-playerbots log -1 --format=%cs).Trim()
 
-          $packageEmoji = [char]::ConvertFromUtf32(0x1F4E6)
-          $rocketEmoji  = [char]::ConvertFromUtf32(0x1F680)
           $bt           = '`'
           $bt3          = '```'
 
           $lines = [System.Collections.Generic.List[string]]::new()
           $lines.Add("Turnkey Windows portable distribution for AzerothCore WotLK (3.3.5a) and mod-playerbots with an automated startup orchestrator and client data downloader.")
           $lines.Add("")
-          $lines.Add("### $packageEmoji Upstream Versions")
+          $lines.Add("### Upstream Versions")
           $lines.Add("- **azerothcore-wotlk**: [$bt$acoreShort$bt](https://github.com/mod-playerbots/azerothcore-wotlk/commit/$acoreSha) (${bt}Playerbot${bt} branch, $acoreDate)")
           $lines.Add("- **mod-playerbots**: [$bt$modShort$bt](https://github.com/mod-playerbots/mod-playerbots/commit/$modSha) (${bt}master${bt} branch, $modDate)")
           $lines.Add("")
-          $lines.Add("### $rocketEmoji Quick Start")
+          $lines.Add("### Quick Start")
           $lines.Add("1. Download and extract **${bt}mod-playerbots-portable-$ver.zip${bt}** from the Assets below.")
           $lines.Add("2. Run **${bt}startup.exe${bt}** (on first run, required client data and database will be initialized automatically).")
           $lines.Add("3. Set realmlist to ${bt}set realmlist 127.0.0.1${bt} and create an account via the server console:")
