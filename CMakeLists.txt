@@ -231,8 +231,8 @@ if(WIN32)
 
         set(MSIX_LAYOUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/msix-layout" CACHE PATH "Directory for MSIX packaging layout")
         set(MSIX_STAGING_DIR "${CMAKE_CURRENT_BINARY_DIR}/msixupload-staging" CACHE PATH "Directory for MSIXUpload staging")
-        set(MSIX_PACKAGE_NAME "playerbots" CACHE STRING "Base name for MSIX packages")
-        set(MSIX_OUTPUT_FILE "${PACKAGE_OUTPUT_DIR}/${MSIX_PACKAGE_NAME}.msixupload")
+        set(MSIX_PACKAGE_NAME "mod-playerbots-portable-${PACKAGE_VERSION}" CACHE STRING "Base name for MSIX packages")
+        set(MSIX_OUTPUT_FILE "${PACKAGE_OUTPUT_DIR}/mod-playerbots-portable-${PACKAGE_VERSION}.msixupload")
 
         set(MSIXUPLOAD_COMMANDS
             COMMAND ${CMAKE_COMMAND} -E make_directory "${MSIX_LAYOUT_DIR}"
@@ -290,9 +290,9 @@ if(WIN32)
 
         add_custom_target(package_installer
             COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKAGE_OUTPUT_DIR}"
-            COMMAND "${INNO_SETUP_COMPILER}" "/DAppVer=${PACKAGE_VERSION}" "/O${PACKAGE_OUTPUT_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/installer.iss"
+            COMMAND "${INNO_SETUP_COMPILER}" "/DAppVer=${PACKAGE_VERSION}" "/O${PACKAGE_OUTPUT_DIR}" "/Fmod-playerbots-portable-${PACKAGE_VERSION}" "${CMAKE_CURRENT_SOURCE_DIR}/installer.iss"
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-            COMMENT "Compiling Inno Setup Windows Installer: ${PACKAGE_OUTPUT_DIR}/playerbots-setup-${PACKAGE_VERSION}.exe"
+            COMMENT "Compiling Inno Setup Windows Installer: ${PACKAGE_OUTPUT_DIR}/mod-playerbots-portable-${PACKAGE_VERSION}.exe"
         )
         add_custom_target(package_innosetup
             DEPENDS package_installer
@@ -308,7 +308,7 @@ if(WIN32)
     endif()
 
     # 8. Portable ZIP Packaging Target
-    set(PORTABLE_ZIP_FILE "${PACKAGE_OUTPUT_DIR}/playerbots-portable-${PACKAGE_VERSION}.zip")
+    set(PORTABLE_ZIP_FILE "${PACKAGE_OUTPUT_DIR}/mod-playerbots-portable-${PACKAGE_VERSION}.zip")
 
     add_custom_target(package_zip
         COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKAGE_OUTPUT_DIR}"

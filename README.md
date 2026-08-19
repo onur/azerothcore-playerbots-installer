@@ -7,7 +7,7 @@ A complete, turnkey Windows distribution for running **[AzerothCore WotLK (3.3.5
 ## 🚀 Quick Start
 
 1. **Download the Portable Release**:
-   Download the latest `playerbots-portable-<version>.zip` from the **[Latest Release](https://github.com/onur/azerothcore-playerbots-installer/releases/latest)** page.
+   Download the latest `mod-playerbots-portable-<version>.zip` from the **[Latest Release](https://github.com/onur/mod-playerbots-portable/releases/latest)** page.
 2. **Extract the Archive**:
    Extract the `.zip` archive into any folder of your choice.
 3. **Launch the Server**:
@@ -93,8 +93,8 @@ Configuration files are located in the `configs/` directory:
 
 1. **Clone the repository with submodules**:
    ```bash
-   git clone --recurse-submodules https://github.com/your-username/playerbots.git
-   cd playerbots
+   git clone --recurse-submodules https://github.com/onur/mod-playerbots-portable.git
+   cd mod-playerbots-portable
    ```
 
 2. **Configure with CMake**:
@@ -116,7 +116,7 @@ Configuration files are located in the `configs/` directory:
    ```powershell
    cmake --build build --config RelWithDebInfo --target package_zip
    ```
-   Generates `output/playerbots-portable-<version>.zip`.
+   Generates `output/mod-playerbots-portable-<version>.zip`.
 
 ---
 

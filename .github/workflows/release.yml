@@ -138,7 +138,7 @@ jobs:
           $lines.Add("- **mod-playerbots**: [$bt$modShort$bt](https://github.com/mod-playerbots/mod-playerbots/commit/$modSha) (${bt}master${bt} branch, $modDate)")
           $lines.Add("")
           $lines.Add("### $rocketEmoji Quick Start")
-          $lines.Add("1. Download and extract **${bt}playerbots-portable-$ver.zip${bt}** from the Assets below.")
+          $lines.Add("1. Download and extract **${bt}mod-playerbots-portable-$ver.zip${bt}** from the Assets below.")
           $lines.Add("2. Run **${bt}startup.exe${bt}** (on first run, required client data and database will be initialized automatically).")
           $lines.Add("3. Set realmlist to ${bt}set realmlist 127.0.0.1${bt} and create an account via the server console:")
           $lines.Add("   ${bt3}text")
